@@ -65,7 +65,7 @@ class BenchmarkWorker(QThread):
 
     def __init__(self, config):
         super().__init__()
-        self.config = replace(config, source_language="en", target_language=TargetLanguage.CHINESE)
+        self.config = replace(config, source_language="en", target_language=TargetLanguage.CHINESE, translation_enabled=True)
 
     def run(self):
         engine = None

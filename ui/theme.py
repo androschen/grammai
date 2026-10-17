@@ -42,7 +42,9 @@ QTabBar::tab:hover { background: #202d28; color: #e3ede7; }
 QTabBar::tab:selected { background: #2a4236; color: #b8f2d0; font-weight: 600; }
 QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; }
-QPlainTextEdit { background: #171e1e; border: 1px solid #33403b; border-radius: 12px; padding: 12px; selection-background-color: #355c49; }
+QPlainTextEdit, QListWidget { background: #171e1e; border: 1px solid #33403b; border-radius: 12px; padding: 12px; selection-background-color: #355c49; }
+QListWidget::item { padding: 9px; border-bottom: 1px solid #293233; }
+QListWidget::item:selected { background: #2a4236; color: #b8f2d0; border-radius: 6px; }
 QCheckBox { spacing: 8px; color: #b4c6bf; }
 QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #52645b; border-radius: 5px; background: #202829; }
 QCheckBox::indicator:checked { background: #b3f2ce; border-color: #b3f2ce; image: url('@CHECK@'); }
@@ -56,6 +58,14 @@ QToolTip { color: #e7eded; background: #26332e; border: 1px solid #5b7567; paddi
 """.replace('@CHEVRON@', (_ASSETS / 'chevron.svg').as_posix()).replace('@CHECK@', (_ASSETS / 'check.svg').as_posix()).replace('@UP@', (_ASSETS / 'chevron-up.svg').as_posix())
 
 
+APP_STYLE += """
+QSlider::groove:horizontal { height: 6px; background: #33403e; border-radius: 3px; }
+QSlider::sub-page:horizontal { background: #89dcba; border-radius: 3px; }
+QSlider::handle:horizontal { width: 16px; height: 16px; margin: -5px 0; background: #b3f2ce; border: 1px solid #52665d; border-radius: 8px; }
+QSlider::handle:horizontal:hover { background: #c9f9dd; }
+QSlider::handle:horizontal:focus { border: 2px solid #89dcba; }
+"""
+
 # History inherits the window theme, so existing rows recolor without rebuilding.
 APP_STYLE += """
 QFrame#HistoryCard { background: #1b2322; border: 1px solid #2c3933; border-radius: 8px; }
@@ -66,6 +76,13 @@ QFrame#HistoryCard[featured="true"] QLabel#target { font-size: 22px; }
 QFrame#HistoryCard QLabel#native { color: #99aca1; font-size: 12px; }
 QFrame#HistoryCard QPushButton { background: transparent; color: #a3bfaf; border: none; border-radius: 5px; padding: 3px 6px; font-size: 11px; }
 QFrame#HistoryCard QPushButton:hover, QFrame#HistoryCard QPushButton:checked { background: #34493e; color: #def6e7; }
+"""
+
+APP_STYLE += """
+QFrame#sentenceSource { background: #1b2322; border: 1px solid #2c3933; border-radius: 16px; }
+QFrame#sentenceTranslation { background: #1c2b25; border: 1px solid #3b5747; border-radius: 16px; }
+QFrame#sentenceSource QLabel, QFrame#sentenceTranslation QLabel { border: none; background: transparent; }
+QTextBrowser { background: #171e1e; border: 1px solid #33403b; border-radius: 10px; padding: 10px; }
 """
 
 _LIGHT = {

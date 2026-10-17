@@ -11,19 +11,23 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QLayout,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from core.events import SubtitleUpdate
+from core.revisions import revision_label
 
 
 
 
 class HistoryCard(QFrame):
+    study_requested = Signal(object)
     def __init__(self, update: SubtitleUpdate, parent: QWidget | None = None, featured: bool = False) -> None:
         super().__init__(parent)
+        self.subtitle=update
         self.setObjectName("HistoryCard")
         self.setProperty("featured",featured)
         if not featured:
@@ -45,7 +49,16 @@ class HistoryCard(QFrame):
         copy.clicked.connect(lambda: self._copy(update))
         header = QHBoxLayout()
         header.addWidget(stamp)
+        if revision_label(update):
+            badge=QLabel('\u270e')
+            badge.setObjectName('revisionBadge')
+            badge.setAccessibleName(revision_label(update))
+            badge.setToolTip(revision_label(update)+'. Revised does not mean verified correct.')
+            header.addWidget(badge)
         header.addStretch()
+        study=QPushButton("Details")
+        study.clicked.connect(lambda:self.study_requested.emit(self.subtitle))
+        header.addWidget(study)
         header.addWidget(copy)
         layout.addLayout(header)
 
@@ -79,6 +92,13 @@ class HistoryCard(QFrame):
         stamp.setObjectName('hint')
         stamp.setFixedWidth(36)
         row.addWidget(stamp,0,Qt.AlignmentFlag.AlignTop)
+        revision=revision_label(update)
+        if revision:
+            badge=QLabel('\u270e')
+            badge.setObjectName('revisionBadge')
+            badge.setToolTip(revision+'. Revised does not mean verified correct.')
+            badge.setAccessibleName(revision)
+            row.addWidget(badge,0,Qt.AlignmentFlag.AlignTop)
         text=update.target_text or update.native_text
         if update.translation_status == 'unavailable':
             text='Original: '+update.native_text
@@ -88,38 +108,11 @@ class HistoryCard(QFrame):
         target.setTextFormat(Qt.TextFormat.PlainText)
         target.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         row.addWidget(target,1)
-        self._details=QWidget()
-        detail_layout=QVBoxLayout(self._details)
-        detail_layout.setContentsMargins(44,2,0,2)
-        detail_layout.setSpacing(2)
-        lines=[(update.phonetics,'phonetic')]
-        if update.native_phonetics != update.phonetics:
-            lines.append((update.native_phonetics,'phonetic'))
-        if update.native_text != update.target_text and update.target_text:
-            lines.append((update.native_text,'native'))
-        for line,name in lines:
-            if line:
-                label=QLabel(line)
-                label.setObjectName(name)
-                label.setWordWrap(True)
-                label.setTextFormat(Qt.TextFormat.PlainText)
-                label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                detail_layout.addWidget(label)
-        self._details.hide()
-        self._expand=QPushButton('Details')
-        self._expand.setCheckable(True)
-        self._expand.setToolTip('Show pronunciation and original text')
-        self._expand.setAccessibleName('Expand subtitle pronunciation and original text')
-        self._expand.toggled.connect(self._details.setVisible)
-        self._expand.toggled.connect(lambda checked:self._expand.setText("Less" if checked else "Details"))
-        self._expand.setVisible(detail_layout.count()>0)
-        row.addWidget(self._expand,0,Qt.AlignmentFlag.AlignTop)
-        copy=QPushButton('Copy')
-        copy.setToolTip('Copy translation, pronunciation and original text')
-        copy.clicked.connect(lambda:self._copy(update))
-        row.addWidget(copy,0,Qt.AlignmentFlag.AlignTop)
+        self.details_button=QPushButton('Details')
+        self.details_button.setToolTip('Original audio, pronunciation, revisions and manual recheck')
+        self.details_button.clicked.connect(lambda:self.study_requested.emit(self.subtitle))
+        row.addWidget(self.details_button,0,Qt.AlignmentFlag.AlignTop)
         layout.addLayout(row)
-        layout.addWidget(self._details)
 
     def _copy(self, update):
         from PySide6.QtWidgets import QApplication
@@ -129,6 +122,7 @@ class HistoryCard(QFrame):
 
 class HistoryPanel(QWidget):
     cleared = Signal()
+    study_requested = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -162,8 +156,9 @@ class HistoryPanel(QWidget):
         self._list = QVBoxLayout()
         self._list.setContentsMargins(0, 0, 0, 0)
         self._list.setSpacing(4)
+        self._list.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._list.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
         self._list.addWidget(self._empty)
-        self._list.addStretch(1)
 
         inner = QWidget()
         inner.setLayout(self._list)
@@ -176,6 +171,11 @@ class HistoryPanel(QWidget):
         scroll.setMinimumHeight(220)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll = scroll
+        self._follow_timer = QTimer(self)
+        self._follow_timer.setSingleShot(True)
+        self._follow_timer.timeout.connect(self._scroll_bottom)
+        scroll.verticalScrollBar().rangeChanged.connect(self._schedule_follow)
+        self._follow.toggled.connect(self._schedule_follow)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -186,31 +186,66 @@ class HistoryPanel(QWidget):
     def append(self, update: SubtitleUpdate) -> None:
         self._empty.hide()
         card = HistoryCard(update)
-        self._list.insertWidget(self._list.count() - 1, card)
+        card.study_requested.connect(self.study_requested.emit)
+        self._list.addWidget(card)
         while self._card_count() > 80:
             self._remove_oldest_card()
         self._refresh_count()
-        if self._follow.isChecked():
-            QTimer.singleShot(0, self, self._scroll_bottom)
+        self._schedule_follow()
+
+    def replace_update(self,update):
+        for index in range(self._list.count()):
+            old=self._list.itemAt(index).widget()
+            if isinstance(old,HistoryCard) and old.subtitle.uid==update.uid:
+                self._list.takeAt(index)
+                old.hide()
+                old.deleteLater()
+                card=HistoryCard(update)
+                card.study_requested.connect(self.study_requested.emit)
+                self._list.insertWidget(index,card)
+                self._schedule_follow()
+                return True
+        return False
+
+    def _schedule_follow(self, *args):
+        if self._follow.isChecked() and self._card_count():
+            # Let Qt finish deferred wrapping and scroll-content resizing first.
+            self._follow_timer.start(16)
+        else:
+            self._follow_timer.stop()
 
     def _scroll_bottom(self):
-        bar = self._scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        if not self._follow.isChecked():
+            return
+        # Follow the final sentence, not unused space in the scroll content.
+        self._list.activate()
+        for index in reversed(range(self._list.count())):
+            card = self._list.itemAt(index).widget()
+            if isinstance(card, HistoryCard):
+                # ensureWidgetVisible may use a card's hidden details/focus child.
+                # Its layout geometry is the visible sentence's actual extent.
+                bar = self._scroll.verticalScrollBar()
+                bar.setValue(max(0, card.geometry().bottom() + 1
+                                 - self._scroll.viewport().height()))
+                break
 
     def _on_clear_clicked(self) -> None:
         self.clear()
         self.cleared.emit()
 
     def clear(self) -> None:
+        self._follow_timer.stop()
         index = 0
         while index < self._list.count():
             widget = self._list.itemAt(index).widget()
             if isinstance(widget, HistoryCard):
                 self._list.takeAt(index)
+                widget.hide()
                 widget.deleteLater()
             else:
                 index += 1
         self._empty.show()
+        self._scroll.verticalScrollBar().setValue(0)
         self._refresh_count()
 
     def _card_count(self) -> int:
@@ -225,6 +260,7 @@ class HistoryPanel(QWidget):
             widget = self._list.itemAt(i).widget()
             if isinstance(widget, HistoryCard):
                 self._list.takeAt(i)
+                widget.hide()
                 widget.deleteLater()
                 return
 

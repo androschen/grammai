@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.events import SubtitleUpdate
+from ui.subtitle_text import SubtitleLabel
 
 
 class SubtitleStack(QWidget):
@@ -25,10 +26,10 @@ class SubtitleStack(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
-        self.phonetics = QLabel("")
-        self.target = QLabel("Waiting for audio…")
-        self.native_phonetics = QLabel("")
-        self.native = QLabel("")
+        self.phonetics = SubtitleLabel("")
+        self.target = SubtitleLabel("Waiting for audio…")
+        self.native_phonetics = SubtitleLabel("")
+        self.native = SubtitleLabel("")
 
         self.phonetics.setFont(QFont("Segoe UI", 14))
         self.target.setFont(QFont("Microsoft YaHei", 28, QFont.Weight.DemiBold))
@@ -61,7 +62,7 @@ class SubtitleStack(QWidget):
         self.native_phonetics.setText(native_ph)
         self.native_phonetics.setVisible(bool(native_ph))
         self.native.setText(update.native_text)
-        self.native.setVisible(bool(update.native_text.strip()))
+        self.native.setVisible(bool(update.native_text.strip()) and update.native_text!=update.target_text)
 
     def reset(self, message: str = "Subtitles on") -> None:
         self.phonetics.setText("")

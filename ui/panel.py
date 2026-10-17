@@ -25,11 +25,13 @@ def _tray_icon():
 
 
 class ControlPanel(QWidget):
-    def __init__(self,config,events):
+    def __init__(self,config,events,replays=None):
         super().__init__()
         self._config,self._events=config,events
+        self._replays=replays
         self._quitting=False
         self._history=SessionHistory()
+        self._latest_id=None
         self.setObjectName('mainPanel')
         self.setWindowTitle('GrammAI - Live translation')
         self._applied_theme = config.theme
@@ -46,6 +48,7 @@ class ControlPanel(QWidget):
         events.audio_level_changed.connect(self._on_audio_level)
         events.state_changed.connect(self._on_app_state)
         events.subtitle_ready.connect(self._on_subtitle)
+        events.subtitle_corrected.connect(self._on_corrected)
         events.benchmark_busy.connect(self._benchmark_busy)
 
     def _build_ui(self):
@@ -76,6 +79,9 @@ class ControlPanel(QWidget):
         self._theme_picker.setCurrentIndex(self._theme_picker.findData(self._config.theme))
         self._theme_picker.currentIndexChanged.connect(self._change_theme)
         header.addWidget(self._theme_picker)
+        saved=QPushButton('Saved phrases')
+        saved.clicked.connect(self._open_phrasebook)
+        header.addWidget(saved)
         settings=QPushButton('Settings')
         settings.clicked.connect(lambda:self._open_settings(0))
         header.addWidget(settings)
@@ -86,6 +92,7 @@ class ControlPanel(QWidget):
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
         splitter=QSplitter(Qt.Orientation.Horizontal)
+        self._workspace=splitter
         controls=QFrame()
         controls.setObjectName('card')
         controls.setMinimumWidth(240)
@@ -142,6 +149,11 @@ class ControlPanel(QWidget):
         self._toggle.setCheckable(True)
         self._toggle.clicked.connect(self._on_toggle_clicked)
         left.addWidget(self._toggle)
+        self._translation_toggle=ToggleSwitch('Translate speech')
+        self._translation_toggle.setChecked(self._config.translation_enabled)
+        self._translation_toggle.toggled.connect(self._set_translation_mode)
+        self._language.setEnabled(self._config.translation_enabled)
+        left.addWidget(self._translation_toggle)
         self._overlay_toggle=ToggleSwitch('Floating subtitles')
         self._overlay_toggle.setChecked(self._config.show_overlay)
         self._overlay_toggle.toggled.connect(self._events.overlay_toggled.emit)
@@ -190,12 +202,42 @@ class ControlPanel(QWidget):
         self._latest.addWidget(empty)
         right.addLayout(self._latest)
         self._history_panel=HistoryPanel(self)
-        self._history_panel.cleared.connect(self._history.clear)
+        self._history_panel.cleared.connect(self.clear_history)
+        self._history_panel.study_requested.connect(self._events.learning_requested.emit)
         right.addWidget(self._history_panel,1)
         splitter.addWidget(reading)
+        self._details_host=QWidget()
+        self._details_layout=QVBoxLayout(self._details_host)
+        self._details_layout.setContentsMargins(0,0,0,0)
+        splitter.addWidget(self._details_host)
+        self._details_host.hide()
+        self._details_view=None
         splitter.setSizes([290,620])
         splitter.setStretchFactor(1,1)
         layout.addWidget(splitter,1)
+
+    def open_sentence_details(self,dialog):
+        if self._details_view is not None:
+            self._details_view.reject()
+        self._details_view=dialog
+        dialog.setParent(self._details_host,Qt.WindowType.Widget)
+        self._details_layout.addWidget(dialog)
+        dialog.finished.connect(lambda result:self._close_details(dialog))
+        self._details_host.show()
+        dialog.show()
+        screen=self.screen().availableGeometry()
+        if screen.width()<1280:
+            self._workspace.widget(0).hide()
+        self.resize(min(1480,screen.width()-48),self.height())
+        self._workspace.setSizes([260,520,480])
+
+    def _close_details(self,dialog):
+        self._details_layout.removeWidget(dialog)
+        dialog.deleteLater()
+        if self._details_view is dialog:
+            self._details_view=None
+            self._details_host.hide()
+            self._workspace.widget(0).show()
 
     def _build_tray(self):
         tray=QSystemTrayIcon(_tray_icon(),self)
@@ -233,13 +275,17 @@ class ControlPanel(QWidget):
         self._config.audio_device_kind=source.kind if source else 'loopback'
         self._events.state_changed.emit(self._config.snapshot())
 
+    def _set_translation_mode(self,enabled):
+        self._config.translation_enabled=enabled
+        self._events.state_changed.emit(self._config.snapshot())
+
     def _on_language_changed(self):
         self._config.source_language=self._source.currentData()
         self._config.target_language=TargetLanguage(self._language.currentData())
         self._events.state_changed.emit(self._config.snapshot())
 
     def _open_settings(self,page=0):
-        dialog=SettingsDialog(self._config,self._events,self,page=page)
+        dialog=SettingsDialog(self._config,self._events,self,page=page,replays=self._replays)
         dialog.exec()
         dialog.deleteLater()
 
@@ -252,9 +298,16 @@ class ControlPanel(QWidget):
         if self._applied_theme != self._config.theme:
             self._applied_theme=self._config.theme
             self.setStyleSheet(style_for(self._config.theme))
+            if self._details_view is not None:
+                self._details_view.setStyleSheet(style_for(self._config.theme))
         self._theme_picker.blockSignals(True)
         self._theme_picker.setCurrentIndex(self._theme_picker.findData(self._config.theme))
         self._theme_picker.blockSignals(False)
+        self._translation_toggle.blockSignals(True)
+        self._translation_toggle.setChecked(self._config.translation_enabled)
+        self._translation_toggle.blockSignals(False)
+        self._language.setEnabled(self._config.translation_enabled)
+        self.set_subtitles_on(self._toggle.isChecked())
         self._meter.set_threshold(round(state.noise_threshold*100))
         for combo,value in ((self._device,state.device_id),(self._source,state.source_language),(self._language,state.target_language)):
             combo.blockSignals(True)
@@ -270,27 +323,49 @@ class ControlPanel(QWidget):
     def _on_subtitle(self,update):
         if self._history.append(update):
             self._history_panel.append(update)
+        self._show_latest(update)
+
+    def _show_latest(self,update):
+        self._latest_id=update.uid
         while self._latest.count():
             widget=self._latest.takeAt(0).widget()
             if widget:
                 widget.hide()
                 widget.deleteLater()
         card=HistoryCard(update,featured=True)
+        card.study_requested.connect(self._events.learning_requested.emit)
         card.setMaximumHeight(230)
         self._latest.addWidget(card)
 
+    @Slot(object)
+    def _on_corrected(self,update):
+        if self._history.replace(update):
+            self._history_panel.replace_update(update)
+        if self._latest_id==update.uid:
+            self._show_latest(update)
+
+    def _open_phrasebook(self):
+        from core.phrasebook import Phrasebook
+        from ui.learning import PhrasebookDialog
+        dialog=PhrasebookDialog(self._config,Phrasebook(),self)
+        dialog.exec()
+        dialog.deleteLater()
+
     def clear_history(self):
+        if self._details_view is not None:
+            self._details_view.reject()
         self._history.clear()
         self._history_panel.clear()
 
     def set_subtitles_on(self,enabled):
         self._badge.setText('LIVE' if enabled else 'READY')
         self._toggle.setChecked(enabled)
-        self._toggle.setText('Stop translation' if enabled else 'Start translation')
+        action='translation' if self._config.translation_enabled else 'transcription'
+        self._toggle.setText(('Stop ' if enabled else 'Start ')+action)
         self._toggle.setProperty('active','true' if enabled else 'false')
         self._toggle.style().unpolish(self._toggle)
         self._toggle.style().polish(self._toggle)
-        self._tray_toggle.setText('Stop translation' if enabled else 'Start translation')
+        self._tray_toggle.setText(('Stop ' if enabled else 'Start ')+action)
         self._tray.setToolTip('GrammAI - translating' if enabled else 'GrammAI - stopped')
 
     @Slot(bool)
@@ -318,6 +393,8 @@ class ControlPanel(QWidget):
 
     def mark_quitting(self):
         self._quitting=True
+        if self._details_view is not None:
+            self._details_view.reject()
         self.clear_history()
         self._tray.hide()
 

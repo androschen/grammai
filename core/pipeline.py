@@ -6,49 +6,23 @@ from dataclasses import replace
 from pathlib import Path
 from queue import Empty, Queue
 from time import monotonic
+from threading import Event
 
 import numpy as np
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from audio.capture import LoopbackCapture, normalized_rms
+from audio.replay import ReplayStore
 from core.config import AppConfig
 from core.events import EventBus
 from ml.whisper_engine import WhisperEngine
 
 
-class SpeechSegmenter:
-    """Gate-based utterances with pre-roll and a silence tail; Whisper applies VAD."""
-    def __init__(self, config: AppConfig) -> None:
-        self.config = config
-        self.pre = deque(maxlen=max(1, int(0.2 / config.capture_chunk_seconds)))
-        self.parts: list[np.ndarray] = []
-        self.samples = 0
-        self.silence = 0
-
-    def push(self, chunk: np.ndarray) -> np.ndarray | None:
-        rate = self.config.sample_rate
-        loud = normalized_rms(chunk, self.config.rms_full_scale) >= self.config.noise_threshold
-        if not self.parts:
-            if not loud:
-                self.pre.append(chunk)
-                return None
-            self.parts.extend(self.pre)
-            self.pre.clear()
-            self.samples = sum(x.size for x in self.parts)
-        self.parts.append(chunk)
-        self.samples += chunk.size
-        self.silence = 0 if loud else self.silence + chunk.size
-        if self.samples < rate * 6 and self.silence < rate * 0.5:
-            return None
-        audio = np.concatenate(self.parts)
-        voiced = self.samples - self.silence
-        self.parts = []
-        self.samples = self.silence = 0
-        return audio if voiced >= rate * 0.4 else None
+from audio.segmentation import SpeechSegmenter, StreamingSpeechDetector
 
 
 class InferenceWorker(QThread):
-    subtitle = Signal(object)
+    subtitle = Signal(object,object,float)
     telemetry = Signal(object)
 
     def __init__(self, config, events, engine, audio_queue) -> None:
@@ -59,6 +33,7 @@ class InferenceWorker(QThread):
         self.queue = audio_queue
         self.accepting_audio = False
         self.stop_requested = False
+        self.pause_requested = Event()
 
     def run(self) -> None:
         try:
@@ -92,10 +67,29 @@ class InferenceWorker(QThread):
             except Empty:
                 break
         self.accepting_audio = True
-        segment_started = None
-        segmenter = SpeechSegmenter(self.config)
-        previous = None
+        detector=None
+        if self.config.speech_detection:
+            try:
+                detector=StreamingSpeechDetector()
+            except Exception as exc:
+                self.events.status_changed.emit(f'Speech detector unavailable; using volume gate: {exc}')
+        segmenter = SpeechSegmenter(self.config,detector)
+        was_paused=False
         while not self.isInterruptionRequested():
+            if self.pause_requested.is_set():
+                was_paused=True
+                self.msleep(50)
+                continue
+            if was_paused:
+                if detector is not None:
+                    detector.reset()
+                segmenter=SpeechSegmenter(self.config,detector)
+                while True:
+                    try:
+                        self.queue.get_nowait()
+                    except Empty:
+                        break
+                was_paused=False
             try:
                 chunk = self.queue.get(timeout=0.1)
             except Empty:
@@ -104,23 +98,25 @@ class InferenceWorker(QThread):
                 chunk, captured_at = chunk
             else:
                 captured_at = monotonic()
-            if not segmenter.parts:
-                segment_started = captured_at - len(chunk) / self.config.sample_rate - .2
             audio = segmenter.push(chunk)
             if audio is None:
                 continue
             try:
                 self.events.status_changed.emit("Transcribing / translating…")
+                overlap_setter=getattr(self.engine,'set_audio_overlap',None)
+                if overlap_setter:
+                    overlap_setter(segmenter.last_overlap_samples/self.config.sample_rate)
                 update = self.engine.process(audio, self.config.target_language)
                 self.telemetry.emit(dict(self.engine.last_timings, kind="inference",
                                          backend=self.engine.active_backend,
-                                         subtitle_delay_ms=(monotonic() - segment_started) * 1000))
+                                         subtitle_delay_ms=(monotonic() - captured_at + len(audio)/self.config.sample_rate) * 1000))
                 if self.isInterruptionRequested():
                     return
-                key = (update.native_text.strip(), update.target_text.strip()) if update else None
-                if update is not None and key != previous:
-                    previous = key
-                    self.subtitle.emit(update)
+                if self.pause_requested.is_set():
+                    was_paused=True
+                    continue
+                if update is not None:
+                    self.subtitle.emit(update,audio,captured_at)
                 self.events.status_changed.emit("Translation unavailable — Retry models" if update and update.translation_status == "unavailable" else "Listening for speech")
             except Exception as exc:
                 self.events.status_changed.emit(f"Inference failed: {exc}. Use Retry models.")
@@ -138,13 +134,21 @@ class TranslationPipeline(QObject):
     def __init__(self, config: AppConfig, events: EventBus, engine: WhisperEngine) -> None:
         super().__init__()
         self._config, self._events, self._engine = config, events, engine
-        self._queue = Queue(maxsize=50)
+        self._queue = Queue(maxsize=max(50,round(6/self._config.capture_chunk_seconds)))
         self._capture = None
         self._worker = None
         self._want_capture = False
         self._want_inference = False
         self._closing = False
         self._retry_pending = False
+        self.replays = ReplayStore(config.sample_rate)
+        self._next_replay_cleanup=monotonic()+1
+        self._replay_active = False
+        self._review = None
+        self._review_pending = None
+        events.review_requested.connect(self.request_review)
+        events.playback_active.connect(self.pause_for_replay)
+        events.replay_clear_requested.connect(self.replays.clear)
         self._benchmark = None
         self._benchmark_pending = None
         events.benchmark_requested.connect(self.request_benchmark)
@@ -160,10 +164,12 @@ class TranslationPipeline(QObject):
 
     @property
     def processing_live(self):
-        return self.running and self._benchmark is None and not self._worker.stop_requested and self._worker.accepting_audio
+        return self.running and self._review is None and not self._replay_active and self._benchmark is None and not self._worker.stop_requested and self._worker.accepting_audio
 
     @property
     def active_backend(self):
+        if self._review is not None:
+            return "Retranslating text"
         if self._benchmark is not None:
             return "Benchmark running"
         return getattr(self._engine, 'active_backend', 'Not loaded') if self.running else "Stopped"
@@ -185,7 +191,7 @@ class TranslationPipeline(QObject):
 
     @Slot(object)
     def request_benchmark(self, config):
-        if self._closing or self._benchmark is not None or self._benchmark_pending is not None:
+        if self._closing or self._review is not None or self._review_pending is not None or self._benchmark is not None or self._benchmark_pending is not None:
             return
         self._benchmark_pending = replace(config)
         self._events.setProperty("benchmark_busy", True)
@@ -193,6 +199,50 @@ class TranslationPipeline(QObject):
         self._events.benchmark_progress.emit("Waiting for current inference to finish...")
         if self._worker:
             self._worker.stop()
+
+    @Slot(object)
+    def request_review(self,request):
+        analysis=getattr(self._events,'analysis_service',None)
+        if analysis is not None and analysis.busy:
+            self._events.review_finished.emit({'id':request['update'].uid,'error':'Context analysis is finishing. Try Recheck again shortly.'})
+            return
+        if self._closing or self._review is not None or self._review_pending is not None or self._benchmark is not None or self._benchmark_pending is not None:
+            self._events.review_finished.emit({'id':request['update'].uid,'error':'Another model task is running. Try again when it finishes.'})
+            return
+        self._review_pending=dict(request)
+        if request.get('recheck'):
+            # Snapshot the bounded clip before model shutdown; it may expire while waiting.
+            self._review_pending['audio']=self.replays.get(request['update'].audio_id)
+        self._events.setProperty('review_busy',True)
+        self._events.review_busy.emit(True)
+        self._events.activity_changed.emit('Manual sentence recheck' if request.get('recheck') else 'Text retranslation')
+        if self._worker:
+            self._worker.stop()
+
+    @Slot(bool)
+    def pause_for_replay(self,active):
+        if self._closing:
+            return
+        self._replay_active=active
+        if self._capture and hasattr(self._capture,'suppress_audio'):
+            if active:
+                self._capture.suppress_audio.set()
+            else:
+                self._capture.suppress_audio.clear()
+        if self._worker:
+            if active:
+                self._worker.pause_requested.set()
+            else:
+                self._worker.pause_requested.clear()
+
+    @Slot(object)
+    def _review_result(self,result):
+        if 'duration_ms' in result:
+            self._events.setProperty('recheck_duration_ms',result['duration_ms'])
+        self._events.activity_changed.emit('Sentence recheck failed' if 'error' in result else 'Sentence recheck complete')
+        if 'update' in result and not result.get('requires_confirmation'):
+            self._events.subtitle_corrected.emit(result['update'])
+        self._events.review_finished.emit(result)
 
     @property
     def capturing(self):
@@ -229,6 +279,7 @@ class TranslationPipeline(QObject):
         self._events.status_changed.emit("Volume meter on — subtitles off")
 
     def restart_capture(self):
+        self.replays.clear()
         if self._worker:
             self._worker.stop()
         if self._capture:
@@ -252,6 +303,10 @@ class TranslationPipeline(QObject):
             self._worker.stop()
 
     def stop(self):
+        self.replays.clear()
+        self._review_pending = None
+        if self._review:
+            self._review.requestInterruption()
         if self._benchmark:
             self._benchmark.requestInterruption()
         self._benchmark_pending = None
@@ -259,10 +314,11 @@ class TranslationPipeline(QObject):
         self._want_capture = self._want_inference = False
         self.restart_capture()
 
-    @Slot(object)
-    def _publish(self, update):
+    @Slot(object,object,float)
+    def _publish(self, update,audio,captured_at):
         if self.sender() is self._worker and self._want_inference and not self._worker.stop_requested:
-            self._events.subtitle_ready.emit(update)
+            key=self.replays.add(update.uid,audio,captured_at-len(audio)/self._config.sample_rate)
+            self._events.subtitle_ready.emit(replace(update,audio_id=key))
 
     @Slot(object)
     def _metrics(self, metrics):
@@ -278,6 +334,16 @@ class TranslationPipeline(QObject):
         self._events.benchmark_progress.emit(message)
 
     def _reconcile(self):
+        if monotonic()>=self._next_replay_cleanup:
+            self.replays.stats()
+            self._next_replay_cleanup=monotonic()+1
+        if self._review is not None:
+            if not self._review.isFinished():
+                return
+            self._review.deleteLater()
+            self._review=None
+            self._events.review_busy.emit(False)
+            self._events.setProperty('review_busy',False)
         if self._benchmark is not None:
             if not self._benchmark.isFinished():
                 return
@@ -313,8 +379,10 @@ class TranslationPipeline(QObject):
                 self.shutdown_finished.emit()
             return
         if self._want_capture and self._capture is None:
-            self._queue = Queue(maxsize=50)
+            self._queue = Queue(maxsize=max(50,round(6/self._config.capture_chunk_seconds)))
             self._capture = LoopbackCapture(self._config, self._events, self._queue)
+            if self._replay_active and hasattr(self._capture,"suppress_audio"):
+                self._capture.suppress_audio.set()
             self._capture.device_resolved.connect(self._device_resolved)
             self._capture.start()
         if self._benchmark_pending is not None and self._worker is None:
@@ -325,7 +393,14 @@ class TranslationPipeline(QObject):
             self._benchmark.progress.connect(self._benchmark_progress)
             self._benchmark.start()
             return
-        if self._want_inference and self._worker is None:
+        if self._review_pending is not None and self._worker is None:
+            from ml.review import ReviewWorker
+            self._review=ReviewWorker(replace(self._config),self._review_pending)
+            self._review_pending=None
+            self._review.result.connect(self._review_result)
+            self._review.start()
+            return
+        if self._want_inference and self._worker is None and not self._replay_active:
             if self._retry_pending:
                 self._engine.reset_failures()
                 self._retry_pending = False

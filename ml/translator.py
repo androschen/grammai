@@ -14,6 +14,7 @@ NLLB_LANG = {
     "en": "eng_Latn",
     "zh": "zho_Hans",
     "th": "tha_Thai",
+    "id": "ind_Latn",
 }
 
 
@@ -30,7 +31,7 @@ def whisper_to_short_code(language: str | None, text: str) -> str:
 
 
 class NllbTranslator:
-    """Lazy-loads a quantized NLLB-200 distilled model for en/zh/th."""
+    """Lazy-loads a quantized NLLB-200 distilled model for en/zh/th/id."""
 
     def __init__(self, config: AppConfig, events: EventBus | None = None) -> None:
         self._config = config

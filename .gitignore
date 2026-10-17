@@ -34,4 +34,9 @@ benchmark.wav
 # Packaging output
 /build/
 /dist/
+/.build-tools/
 *.egg-info/
+
+# Personal learning data
+phrases.json
+phrases.json.tmp

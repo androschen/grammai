@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from queue import Full, Queue
 from time import monotonic
+from threading import Event
 
 import numpy as np
 import soundcard as sc
@@ -105,6 +106,7 @@ class LoopbackCapture(QThread):
         self._events = events
         self._queue = queue
         self.stop_requested = False
+        self.suppress_audio = Event()
 
     def run(self) -> None:
         try:
@@ -122,6 +124,8 @@ class LoopbackCapture(QThread):
             with self._open_recorder(mic) as recorder:
                 while not self.isInterruptionRequested():
                     frames = recorder.record(numframes=chunk)
+                    if self.suppress_audio.is_set():
+                        continue
                     mono = to_mono_float32(frames)
                     if mono.size == 0:
                         continue

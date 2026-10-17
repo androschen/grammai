@@ -1,0 +1,15 @@
+GrammAI includes Python, Qt for Python (PySide6), NumPy, SoundCard,
+faster-whisper, CTranslate2, ONNX Runtime, Transformers, Hugging Face Hub,
+SentencePiece, tokenizers, PyThaiNLP, pypinyin, PyAV, psutil and dependencies.
+Distribution metadata and license files are included in the application bundle.
+
+Qt for Python: https://doc.qt.io/qtforpython-6/licenses.html
+Python: https://docs.python.org/3/license.html
+The application uses dynamically linked Qt libraries in _internal/PySide6.
+Corresponding Qt source: https://download.qt.io/official_releases/QtForPython/
+
+Model weights and external Vulkan servers are not bundled in this installer.
+They retain their own licenses and are downloaded/configured separately.
+NLLB weights: https://huggingface.co/facebook/nllb-200-distilled-600M
+Qwen weights: https://huggingface.co/Qwen/Qwen3-4B-GGUF
+Whisper weights: https://huggingface.co/ggerganov/whisper.cpp

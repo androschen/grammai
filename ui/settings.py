@@ -1,10 +1,10 @@
-﻿"""Organized settings with explicit model changes and live noise-gate preview."""
+"""Organized settings with explicit model changes and live noise-gate preview."""
 from dataclasses import fields, replace
 from pathlib import Path
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+    QScrollArea, QSpinBox, QDoubleSpinBox, QTabWidget, QVBoxLayout, QWidget)
 from audio.capture import list_audio_sources
 from core.config import AppConfig, TargetLanguage, QualityMode, LANGUAGE_LABELS, SOURCE_LANGUAGE_LABELS, QUALITY_LABELS
 from core.events import EventBus
@@ -14,7 +14,7 @@ from ui.theme import style_for
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config: AppConfig, events: EventBus, parent=None, page=0):
+    def __init__(self, config: AppConfig, events: EventBus, parent=None, page=0, replays=None):
         super().__init__(parent)
         self._config, self._events = config, events
         self._revert_threshold = config.noise_threshold
@@ -38,11 +38,20 @@ class SettingsDialog(QDialog):
         self._language_page()
         self._appearance_page()
         self._performance_page()
+        from ui.storage import StorageWidget
+        storage_layout=self._page("Storage")
+        self.storage=StorageWidget(config,events,replays)
+        storage_layout.addWidget(self.storage)
+        self.tabs.currentChanged.connect(lambda index:self.storage.set_active(index==4))
         self.tabs.setCurrentIndex(page)
+        self._analysis_page()
         self._feedback = QLabel('Model and device changes take effect when you select Apply. Noise filtering previews live.')
         self._feedback.setObjectName('hint')
         self._feedback.setWordWrap(True)
         layout.addWidget(self._feedback)
+        if self.analysis_settings.service:
+            self.analysis_settings.service.status_changed.connect(self._analysis_status)
+            self.analysis_settings.service.progress_changed.connect(self._analysis_progress)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -82,6 +91,33 @@ class SettingsDialog(QDialog):
         self._gate = NoiseGateEditor(self, round(self._config.noise_threshold * 100))
         self._gate.threshold_changed.connect(self._preview_gate)
         layout.addWidget(self._gate)
+        self._speech_detection=QCheckBox('Use speech-aware boundaries (recommended)')
+        self._speech_detection.setChecked(self._config.speech_detection)
+        layout.addWidget(self._speech_detection)
+        timing=QFormLayout()
+        self._speech_max=QDoubleSpinBox()
+        self._speech_max.setRange(2,8)
+        self._speech_max.setSingleStep(.4)
+        self._speech_max.setValue(self._config.speech_max_seconds)
+        self._speech_max.setSuffix(' s')
+        self._speech_silence=QDoubleSpinBox()
+        self._speech_silence.setRange(.24,1)
+        self._speech_silence.setSingleStep(.04)
+        self._speech_silence.setValue(self._config.speech_silence_seconds)
+        self._speech_silence.setSuffix(' s')
+        self._speech_overlap=QDoubleSpinBox()
+        self._speech_overlap.setRange(0,.8)
+        self._speech_overlap.setSingleStep(.08)
+        self._speech_overlap.setValue(self._config.speech_overlap_seconds)
+        self._speech_overlap.setSuffix(' s')
+        timing.addRow('Speech segment target',self._speech_max)
+        timing.addRow('Pause before final subtitle',self._speech_silence)
+        timing.addRow('Overlap at continuous-speech cuts',self._speech_overlap)
+        layout.addLayout(timing)
+        hint=QLabel('The noise threshold controls when speech starts. Speech detection preserves quieter syllables afterward. Shorter pauses reduce delay; very short segments can reduce recognition accuracy. Speech-aware targets of 4 seconds or more allow up to 0.8 seconds of extra endpoint buffering.')
+        hint.setWordWrap(True)
+        hint.setObjectName('hint')
+        layout.addWidget(hint)
         layout.addStretch()
 
     def _language_page(self):
@@ -91,39 +127,41 @@ class SettingsDialog(QDialog):
             self._source.addItem(name, code)
         for code, name in LANGUAGE_LABELS.items():
             self._target.addItem(name, code.value)
+        self._translation = QCheckBox("Translate speech (turn off for transcription-only CPU testing)")
         self._pronunciation = QCheckBox('Show Chinese pinyin and Thai pronunciation on the overlay')
         form = QFormLayout()
         form.addRow('Spoken language', self._source)
         form.addRow('Translate into', self._target)
         layout.addLayout(form)
+        layout.addWidget(self._translation)
         layout.addWidget(self._pronunciation)
         hint = QLabel('Choose the spoken language when you know it. Auto-detect is useful when the language changes. History keeps pronunciation for later reading.')
         hint.setWordWrap(True)
         hint.setObjectName('hint')
         layout.addWidget(hint)
+        self._speech_prompt=QLineEdit(self._config.speech_prompt)
+        self._speech_prompt.setMaxLength(300)
+        self._speech_prompt.setPlaceholderText('Optional names, terminology, or desired written form; up to 300 characters')
+        layout.addWidget(QLabel('Speech-recognition vocabulary hint'))
+        layout.addWidget(self._speech_prompt)
         layout.addStretch()
 
     def _appearance_page(self):
-        layout = self._page('Appearance')
-        self._theme = QComboBox()
-        self._theme.addItem('Dark','dark')
-        self._theme.addItem('Light','light')
-        self._font = QSpinBox()
-        self._font.setRange(16,48)
-        self._opacity = QSpinBox()
-        self._opacity.setRange(40,240)
-        self._position = QComboBox()
-        self._position.addItem('Bottom of screen', 'bottom')
-        self._position.addItem('Top of screen', 'top')
-        self._show_overlay = QCheckBox('Show floating subtitles while translating')
-        form = QFormLayout()
-        form.addRow('App theme',self._theme)
-        form.addRow('Subtitle font size',self._font)
-        form.addRow('Background opacity (40-240)',self._opacity)
-        form.addRow('Position',self._position)
-        layout.addLayout(form)
-        layout.addWidget(self._show_overlay)
-        layout.addStretch()
+        from ui.appearance import AppearanceEditor
+        layout=self._page('Appearance')
+        self.appearance=AppearanceEditor(self._config,self._events,self)
+        layout.addWidget(self.appearance)
+        self.appearance.pronunciation.toggled.connect(self._pronunciation.setChecked)
+        self._pronunciation.toggled.connect(self.appearance.pronunciation.setChecked)
+        self._theme=self.appearance.theme
+        self._position=self.appearance.position
+        self._show_overlay=self.appearance.show_overlay
+
+    def _analysis_page(self):
+        from ui.local_ai_settings import LocalAISettings
+        layout=self._page('Analysis')
+        self.analysis_settings=LocalAISettings(self._config,self._events,self)
+        layout.addWidget(self.analysis_settings)
 
     def _file_row(self, edit, executable=False):
         row = QHBoxLayout()
@@ -136,6 +174,13 @@ class SettingsDialog(QDialog):
         button.clicked.connect(browse)
         row.addWidget(button)
         return row
+
+    def _analysis_status(self,message):
+        if self.tabs.currentIndex()==5:
+            self._feedback.setText(message)
+
+    def _analysis_progress(self,message,percent):
+        self._analysis_status(f'{message}: {percent}%')
 
     def _performance_page(self):
         outer = self._page('Performance')
@@ -176,10 +221,22 @@ class SettingsDialog(QDialog):
         self._gpu_model.textChanged.connect(self._backend_visibility)
         layout.addLayout(form)
         layout.addWidget(self._preset_help)
-        hint = QLabel('GPU mode keeps the server loaded and verifies Vulkan allocation at startup. Translation uses CPU. With Vulkan, the selected GGML file determines model size; presets control decoding effort. GPU utilization and VRAM monitoring are unavailable.')
+        hint = QLabel('GPU mode keeps the server loaded and verifies Vulkan allocation at startup. Translation uses CPU. With Vulkan, the selected GGML file determines model size; presets control decoding effort. GPU utilization and VRAM are shown when Windows performance counters are available.')
         hint.setObjectName('hint')
         hint.setWordWrap(True)
         layout.addWidget(hint)
+        installed=QPushButton('Use installed GPU speech model')
+        def select_installed():
+            from core.speech_assets import installed_paths
+            executable,model=installed_paths()
+            if executable.is_file() and model.is_file():
+                self._exe.setText(str(executable.resolve()))
+                self._gpu_model.setText(str(model.resolve()))
+                self._backend.setCurrentIndex(self._backend.findData('vulkan'))
+            else:
+                self._feedback.setText('GPU speech assets are not installed. See the local speech setup instructions in README.')
+        installed.clicked.connect(select_installed)
+        layout.addWidget(installed)
         layout.addStretch()
         monitor = QWidget()
         monitor_layout = QVBoxLayout(monitor)
@@ -215,10 +272,9 @@ class SettingsDialog(QDialog):
         self._threads.setValue(c.cpu_threads)
         self._mt_threads.setValue(c.translation_threads)
         self._theme.setCurrentIndex(max(0,self._theme.findData(c.theme)))
-        self._font.setValue(c.subtitle_font_size)
-        self._opacity.setValue(c.overlay_opacity)
         self._exe.setText(c.vulkan_executable)
         self._gpu_model.setText(c.vulkan_model)
+        self._translation.setChecked(c.translation_enabled)
         self._pronunciation.setChecked(c.show_pronunciation)
         self._show_overlay.setChecked(c.show_overlay)
         self._describe_preset()
@@ -241,6 +297,12 @@ class SettingsDialog(QDialog):
         source = next((s for s in self._sources if s.device_id == c.audio_device_id),None)
         c.audio_device_name = source.name if source else 'Desktop audio (default)'
         c.audio_device_kind = source.kind if source else 'loopback'
+        c.translation_enabled = self._translation.isChecked()
+        c.speech_detection=self._speech_detection.isChecked()
+        c.speech_max_seconds=self._speech_max.value()
+        c.speech_silence_seconds=self._speech_silence.value()
+        c.speech_overlap_seconds=self._speech_overlap.value()
+        c.speech_prompt=self._speech_prompt.text().strip()
         c.source_language = self._source.currentData()
         c.target_language = TargetLanguage(self._target.currentData())
         c.quality_mode = QualityMode(self._quality.currentData())
@@ -248,10 +310,8 @@ class SettingsDialog(QDialog):
         c.backend = self._backend.currentData()
         c.cpu_threads, c.translation_threads = self._threads.value(),self._mt_threads.value()
         c.vulkan_executable,c.vulkan_model = self._exe.text().strip(),self._gpu_model.text().strip()
-        c.theme = self._theme.currentData()
-        c.subtitle_font_size,c.overlay_opacity = self._font.value(),self._opacity.value()
-        c.overlay_position = self._position.currentData()
-        c.show_overlay,c.show_pronunciation = self._show_overlay.isChecked(),self._pronunciation.isChecked()
+        self.appearance.apply_to(c)
+        self.analysis_settings.apply_to(c)
         if c.backend == 'vulkan' and (not Path(c.vulkan_executable).is_file() or not Path(c.vulkan_model).is_file()):
             raise ValueError('Select an existing Vulkan whisper-server executable and GGML model first, or choose CPU.')
         return c
@@ -261,12 +321,13 @@ class SettingsDialog(QDialog):
             c = self._draft()
         except ValueError as exc:
             self._feedback.setText(str(exc))
-            self.tabs.setCurrentIndex(3)
+            self.tabs.setCurrentIndex(5 if any(word in str(exc).lower() for word in ('analysis','glossary','https','online')) else 3)
             return False
         for field in fields(c):
             setattr(self._config,field.name,getattr(c,field.name))
         self.setStyleSheet(style_for(c.theme))
         self._revert_threshold = c.noise_threshold
+        self.appearance.restore()
         self._events.state_changed.emit(c.snapshot())
         self._events.overlay_toggled.emit(c.show_overlay)
         self._feedback.setText('Applied. Preferences are saved automatically.')
@@ -307,6 +368,12 @@ class SettingsDialog(QDialog):
             self._bench_status.setText('Finished. Results are separate from live-session measurements.')
 
     def done(self,result):
+        self.appearance.restore()
+        if self.analysis_settings.service:
+            self.analysis_settings.service.status_changed.disconnect(self._analysis_status)
+            self.analysis_settings.service.progress_changed.disconnect(self._analysis_progress)
+        self.analysis_settings.dispose()
+        self.storage.set_active(False)
         for signal,slot in ((self._events.audio_level_changed,self._on_audio_level),
             (self._events.benchmark_progress,self._benchmark_progress),
             (self._events.benchmark_busy,self._benchmark_busy),

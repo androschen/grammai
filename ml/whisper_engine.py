@@ -26,6 +26,13 @@ class WhisperEngine:
         self._vulkan = None
         self.last_timings = {}
         self.active_backend = "Not loaded"
+        self.activity_callback = None
+        self._overlap_seconds=0.
+        self._previous_native=''
+        self._previous_language=None
+
+    def set_audio_overlap(self,seconds):
+        self._overlap_seconds=max(0.,float(seconds))
 
     def configure(self, config: AppConfig) -> None:
         self._config = config
@@ -74,19 +81,34 @@ class WhisperEngine:
         self._model = None
         self._loaded_size = None
         self.active_backend = "Not loaded"
+        self._previous_native=''
+        self._previous_language=None
+        self._overlap_seconds=0.
 
     def reset_failures(self) -> None:
         if self._translator is not None:
             self._translator.reset_failure()
 
     def ensure_translator(self) -> None:
-        if self._translator is None:
+        if not self._config.translation_enabled or self._translator is None:
             return
+        if self.activity_callback:
+            self.activity_callback('Translation model loading')
         self._translator.ensure_loaded()
 
     def process(self, audio: np.ndarray, target: TargetLanguage) -> SubtitleUpdate | None:
         started = perf_counter()
+        if self.activity_callback:
+            self.activity_callback('Transcription')
         native, source_lang = self._transcribe(audio, task="transcribe")
+        from ml.transcript import trim_overlap
+        raw_native=native
+        overlap_seconds=self._overlap_seconds
+        previous_native=self._previous_native if self._previous_language==source_lang else ''
+        if self._previous_language==source_lang:
+            native=trim_overlap(self._previous_native,native,self._overlap_seconds)
+        self._previous_native,self._previous_language=raw_native,source_lang
+        self._overlap_seconds=0.
         stt_end = perf_counter()
         self.last_timings = {"stt_ms": (stt_end - started) * 1000,
                              "mt_ms": 0., "total_ms": (stt_end - started) * 1000,
@@ -95,9 +117,16 @@ class WhisperEngine:
             return None
 
         source = whisper_to_short_code(source_lang, native)
+        if not self._config.translation_enabled:
+            return SubtitleUpdate(phonetics=phonetics_auto(native),target_text=native,
+                native_text=native,translation_status='transcribed',
+                audio_overlap_seconds=overlap_seconds,overlap_previous_text=previous_native,
+                source_language=source,target_language=source)
         target_code = target.value
         target_text = native
         if source != target_code:
+            if self.activity_callback:
+                self.activity_callback('Translation')
             target_text = self._translate(native, source, target, audio)
 
         self.last_timings.update(mt_ms=(perf_counter() - stt_end) * 1000, total_ms=(perf_counter() - started) * 1000)
@@ -110,6 +139,9 @@ class WhisperEngine:
             native_text=native,
             native_phonetics=phonetics_auto(native),
             translation_status=status,
+            source_language=source,
+            target_language=target_code,
+            audio_overlap_seconds=overlap_seconds,overlap_previous_text=previous_native,
         )
 
     def _translate(
@@ -132,7 +164,11 @@ class WhisperEngine:
         return ""
 
     def _transcribe(self, audio: np.ndarray, task: str) -> tuple[str, str | None]:
+        allowed = {"auto_trio": ("en", "zh", "th"),
+                   "auto_four": ("en", "zh", "th", "id")}.get(self._config.source_language)
         if self._vulkan is not None:
+            if allowed:
+                return self._vulkan.transcribe(audio, None, task == "translate", allowed_languages=allowed)
             return self._vulkan.transcribe(audio, self._source_hint(), task == "translate")
         if self._model is None:
             raise RuntimeError("Whisper model is not loaded.")
@@ -143,13 +179,26 @@ class WhisperEngine:
             beam_size=self._config.beam_size,
             vad_filter=self._config.vad_filter,
             without_timestamps=True,
+            initial_prompt=self._config.speech_prompt or None,
         )
+        # Inspect detection before consuming the lazy decoder. Normal trio speech
+        # uses one transcription; only an outside-language detection needs a retry.
+        if allowed and info.language not in allowed:
+            ranked = [(code, score) for code, score in (info.all_language_probs or []) if code in allowed]
+            if not ranked:
+                raise RuntimeError("Could not detect a language in the selected auto group. Choose a spoken language manually.")
+            language = max(ranked, key=lambda item: item[1])[0]
+            segments, info = self._model.transcribe(
+                audio, language=language, task=task, beam_size=self._config.beam_size,
+                vad_filter=self._config.vad_filter, without_timestamps=True,
+                initial_prompt=self._config.speech_prompt or None,
+            )
         text = " ".join(segment.text.strip() for segment in segments).strip()
         language = getattr(info, "language", None)
         return text, language
 
     def _source_hint(self) -> str | None:
         code = self._config.source_language
-        if not code or code == "auto":
+        if not code or code in ("auto", "auto_trio", "auto_four"):
             return None
         return code

@@ -1,4 +1,4 @@
-﻿"""Performance settings, monitoring, benchmark and overlay regressions."""
+"""Performance settings, monitoring, benchmark and overlay regressions."""
 import io
 import json
 import os
@@ -65,7 +65,7 @@ class SettingsTests(unittest.TestCase):
         c,e=AppConfig(),EventBus()
         with patch('ui.settings.list_audio_sources',return_value=[]):
             dialog=SettingsDialog(c,e,page=3)
-        self.assertEqual(dialog.tabs.count(),4)
+        self.assertEqual(dialog.tabs.count(),6)
         dialog._threads.setValue(2)
         self.assertTrue(dialog.apply())
         self.assertEqual(c.cpu_threads,2)
@@ -103,9 +103,10 @@ class AppearanceTests(unittest.TestCase):
         update=SubtitleUpdate('ni hao','Chinese target','Hello')
         panel._on_subtitle(update)
         row=next(panel._history_panel._list.itemAt(i).widget() for i in range(panel._history_panel._list.count()) if isinstance(panel._history_panel._list.itemAt(i).widget(),HistoryCard))
-        self.assertTrue(row._details.isHidden())
-        row._expand.setChecked(True)
-        self.assertFalse(row._details.isHidden())
+        opened=[]
+        e.learning_requested.connect(opened.append)
+        row.details_button.click()
+        self.assertEqual(opened,[update])
         panel._theme_picker.setCurrentIndex(panel._theme_picker.findData('light'))
         self.assertEqual(c.theme,'light')
         self.assertEqual(panel.styleSheet(),style_for('light'))

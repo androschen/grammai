@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import QWidget, QFormLayout, QLabel, QVBoxLayout, QPlainTextEdit
 from core.preferences import read_json
 from core.benchmark import compare_results
+from ui.resource_graph import ResourceGraph
 
 
 class LivePerformance(QWidget):
@@ -10,9 +11,31 @@ class LivePerformance(QWidget):
         super().__init__(parent)
         self.compact = compact
         self._labels = {}
-        layout = QFormLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0,0,0,0)
+        for fields,title,unit,maximum in (
+            ([('cpu_percent','CPU','#52cba2')],'App CPU','%',100),
+            ([('memory_mb','RAM','#6aaaf7')],'App RAM','MB',None),
+        ):
+            graph=ResourceGraph(events,fields,title,unit,maximum)
+            if compact:
+                graph.setMinimumHeight(82)
+            outer.addWidget(graph)
+        if not compact:
+            outer.addWidget(ResourceGraph(events,[('gpu_percent','Busiest engine','#f0b45d')],
+                'App GPU: busiest engine','%',100))
+            outer.addWidget(ResourceGraph(events,[('stt_ms','Speech','#52cba2'),('mt_ms','Translation','#b898ff')],
+                'Last completed segment: speech (green) / translation (purple)','ms'))
+            hint=QLabel('Dotted markers: processing activity. Hover for values and events. Timings hold the last completed segment.')
+            hint.setWordWrap(True)
+            hint.setObjectName('hint')
+            outer.addWidget(hint)
+        layout = QFormLayout()
+        outer.addLayout(layout)
         layout.setContentsMargins(0, 0, 0, 0)
         fields = [('resources', 'App resources'), ('backend', 'Active engine')]
+        if not compact:
+            fields += [('analysis','History analysis'),('recheck','Manual recheck')]
         if not compact:
             fields += [('health','Recommendation'), ('stages', 'Last speech segment'), ('delay', 'Subtitle delay'), ('queue', 'Live audio queue'),
                        ('gpu', 'GPU monitoring')]
@@ -35,6 +58,11 @@ class LivePerformance(QWidget):
         model = data.get('model', '')
         self._labels['backend'].setText(f'{engine} / {model}' if model else engine)
         if not self.compact:
+            status=data.get('analysis_status','Unloaded')
+            duration=data.get('analysis_duration_ms')
+            self._labels['analysis'].setText(status+(f' / Last analysis {duration/1000:.1f}s' if duration is not None else ''))
+            recheck=data.get('recheck_duration_ms')
+            self._labels['recheck'].setText(f'Last recheck {recheck/1000:.1f}s (includes model loading)' if recheck is not None else 'No manual recheck this session')
             if not data.get('running'):
                 self._labels['health'].setText('Start translation to measure live speech processing.')
             elif data.get('audio_seconds',0) and data.get('total_ms',0) > data['audio_seconds'] * 1000:
@@ -48,7 +76,8 @@ class LivePerformance(QWidget):
             if "subtitle_delay_ms" in data:
                 self._labels["delay"].setText(f"{data['subtitle_delay_ms']/1000:.1f}s from speech start (includes collection and queue)")
             self._labels['queue'].setText(f"{data.get('backlog_seconds',0):.1f}s waiting / {data.get('dropped_seconds',0):.1f}s dropped this session")
-            self._labels['gpu'].setText('Utilization and VRAM unavailable; backend status is shown separately.')
+            gpu,vram=data.get('gpu_percent'),data.get('gpu_memory_mb')
+            self._labels['gpu'].setText(f'Busiest app GPU engine {gpu:.1f}% / Dedicated GPU memory {vram:.0f} MB' if gpu is not None and vram is not None else 'GPU counters unavailable; verified backend status is shown separately.')
 
 
 class BenchmarkResults(QPlainTextEdit):

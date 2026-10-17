@@ -1,0 +1,2 @@
+# Optional: normalize Traditional/Simplified Chinese equivalence in ASR benchmarks.
+opencc-python-reimplemented==0.1.7

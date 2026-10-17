@@ -18,6 +18,8 @@ from core.events import EventBus
 from core.pipeline import TranslationPipeline
 from core.performance import PerformanceMonitor
 from core.preferences import load_config, save_config
+from core.phrasebook import Phrasebook
+from audio.playback import AudioReplay
 from ml.whisper_engine import WhisperEngine
 from ml.translator import NllbTranslator
 from ui.overlay import SubtitleOverlay
@@ -31,12 +33,23 @@ class GrammAIApp:
         config.apply_quality()
         self._translator = NllbTranslator(config, self._events)
         self._engine = WhisperEngine(config, self._translator)
+        self._engine.activity_callback = self._events.activity_changed.emit
+        from core.analysis import AnalysisService
+        self._analysis = AnalysisService(events=self._events,config=config)
+        self._events.analysis_service = self._analysis
+        self._pipeline_finished = False
+        self._analysis.idle.connect(self._analysis_idle)
         self._pipeline = TranslationPipeline(config, self._events, self._engine)
+        self._player = AudioReplay(self._events,self._pipeline.replays)
+        self._phrasebook = Phrasebook()
+        self._learning_active = False
+        self._playback_active = False
+        self._last_update = None
         self._monitor = PerformanceMonitor(self._events, self._pipeline)
         self._translation_enabled = False
         self._benchmark_active = False
         self._overlay = SubtitleOverlay(self._events, config)
-        self._panel = ControlPanel(config, self._events)
+        self._panel = ControlPanel(config, self._events,replays=self._pipeline.replays)
         self._preference_timer = QTimer()
         self._preference_timer.setSingleShot(True)
         self._preference_timer.setInterval(300)
@@ -44,6 +57,12 @@ class GrammAIApp:
 
         self._events.subtitles_toggled.connect(self._on_subtitles_toggled)
         self._events.subtitle_ready.connect(self._overlay.apply_subtitle)
+        self._events.subtitle_ready.connect(self._remember_subtitle)
+        self._events.subtitle_corrected.connect(self._corrected_subtitle)
+        self._events.learning_requested.connect(self._open_study)
+        self._events.review_busy.connect(self._on_review_busy)
+        self._events.playback_active.connect(self._on_playback_active)
+        self._events.replay_clear_requested.connect(self._player.stop)
         self._events.pipeline_error.connect(self._on_pipeline_error)
         self._events.state_changed.connect(self._on_state_changed)
         self._events.quit_requested.connect(self.shutdown)
@@ -63,6 +82,8 @@ class GrammAIApp:
         self._on_subtitles_toggled(True)
 
     def _on_subtitles_toggled(self, enabled: bool) -> None:
+        if enabled and not self._translation_enabled:
+            self._panel._history.begin_context()
         self._translation_enabled = enabled
         self._panel.set_subtitles_on(enabled)
         if enabled:
@@ -85,8 +106,33 @@ class GrammAIApp:
         self._benchmark_active = busy
         self._update_overlay_visibility()
 
+    def _remember_subtitle(self,update):
+        self._last_update=update
+
+    def _corrected_subtitle(self,update):
+        if self._last_update and self._last_update.uid==update.uid:
+            self._last_update=update
+            # History revisions should not rewrite a subtitle already being read.
+
+    def _open_study(self,update):
+        from ui.learning import StudyDialog
+        dialog=StudyDialog(update,self._config,self._events,self._pipeline.replays,self._phrasebook,self._panel,
+            analysis=self._analysis,history=self._panel._history)
+        self._panel.open_sentence_details(dialog)
+
+    def _on_review_busy(self,busy):
+        self._learning_active=busy
+        self._panel.set_status("Rechecking sentence..." if busy else ("Resuming live translation..." if self._translation_enabled else "Ready. Translation is stopped."))
+        self._update_overlay_visibility()
+
+    def _on_playback_active(self,active):
+        self._playback_active=active
+        if not active:
+            self._panel.set_status("Resuming live translation..." if self._translation_enabled else "Replay finished. Translation is stopped.")
+        self._update_overlay_visibility()
+
     def _update_overlay_visibility(self):
-        self._overlay.setVisible(self._translation_enabled and self._config.show_overlay and not self._benchmark_active)
+        self._overlay.setVisible(self._translation_enabled and self._config.show_overlay and not self._benchmark_active and not self._learning_active and not self._playback_active)
 
     def _save_preferences(self):
         try:
@@ -98,6 +144,10 @@ class GrammAIApp:
         self._panel.set_status(message)
 
     def _on_state_changed(self, state) -> None:
+        route=(state.device_id,state.source_language)
+        if getattr(self,'_context_route',None)!=route:
+            self._panel._history.begin_context()
+            self._context_route=route
         self._pipeline.apply_state(state)
         self._preference_timer.start()
         self._update_overlay_visibility()
@@ -108,18 +158,29 @@ class GrammAIApp:
         self._overlay.hide()
 
     def shutdown(self) -> None:
+        self._analysis.shutdown()
+        self._player.stop()
         self._preference_timer.stop()
         self._save_preferences()
         self._monitor.timer.stop()
+        self._monitor.gpu.close()
         self._panel.setEnabled(False)
         self._panel.set_status("Stopping workers...")
         self._pipeline.stop()
 
     def _finish_shutdown(self) -> None:
+        self._pipeline_finished = True
+        if self._analysis.busy:
+            self._panel.set_status('Waiting for the analysis connection to finish...')
+            return
         self._overlay.close()
         self._panel.mark_quitting()
         self._panel.close()
         quit_application()
+
+    def _analysis_idle(self):
+        if self._pipeline_finished:
+            self._finish_shutdown()
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -135,6 +196,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="faster-whisper model size (tiny, base, small, …).",
     )
     parser.add_argument("--start-on", action="store_true")
+    parser.add_argument('--smoke-test',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--smoke-report',default=None,help=argparse.SUPPRESS)
+    parser.add_argument('--verify-models',action='store_true',help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -147,8 +211,24 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("GrammAI")
+    from core.version import APP_VERSION
+    from PySide6.QtGui import QIcon
+    from pathlib import Path
+    app.setApplicationVersion(APP_VERSION)
+    app.setWindowIcon(QIcon(str(Path(__file__).resolve().parent/'ui'/'assets'/'grammai.svg')))
+    if args.smoke_test:
+        from core.packaging_check import smoke_check
+        return smoke_check(args.smoke_report,args.verify_models)
+    from core.desktop import SingleInstance,configure_logging
+    configure_logging()
+    instance=SingleInstance()
+    if not instance.acquire():
+        return 0
+    from core.paths import register_existing_models
+    register_existing_models()
 
     window = GrammAIApp(config)
+    instance.on_activate(window._panel.reveal)
     if args.model:
         config.model_size = args.model
     window.show()
