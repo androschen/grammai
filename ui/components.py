@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
     QFrame,
@@ -46,6 +46,7 @@ class SubtitleStack(QWidget):
         ):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setWordWrap(True)
+            label.setTextFormat(Qt.TextFormat.PlainText)
             label.setStyleSheet(f"background: transparent; color: {color};")
             layout.addWidget(label)
 
@@ -56,7 +57,7 @@ class SubtitleStack(QWidget):
             native_ph = ""
         self.phonetics.setText(target_ph)
         self.phonetics.setVisible(bool(target_ph))
-        self.target.setText(update.target_text)
+        self.target.setText(update.target_text if update.translation_status != "unavailable" else "Translation unavailable")
         self.native_phonetics.setText(native_ph)
         self.native_phonetics.setVisible(bool(native_ph))
         self.native.setText(update.native_text)
@@ -155,6 +156,7 @@ class AudioMeterWidget(QWidget):
         stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         stack.addWidget(self.progress_bar)
         stack.addWidget(self._marker_layer)
+        stack.setCurrentWidget(self._marker_layer)
 
     def set_threshold(self, percent: int) -> None:
         self.threshold = max(1, min(80, int(percent)))
@@ -195,7 +197,7 @@ class AudioMeterWidget(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._place_marker()
+        QTimer.singleShot(0, self, self._place_marker)
 
     def _set_threshold_from_x(self, x: float) -> None:
         width = max(self.width(), 1)

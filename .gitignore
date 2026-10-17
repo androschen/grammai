@@ -6,3 +6,32 @@ venv/
 *.local
 .DS_Store
 Thumbs.db
+
+# Credentials and local configuration
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Downloaded models, caches and runtime data
+/models/
+/.cache/
+/.grammai/
+preferences.json
+benchmarks.json
+benchmark.wav
+*.wav
+*.mp3
+*.mp4
+*.log
+*.tmp
+.preview-*.png
+.modern-*.png
+.history-*.png
+
+# Packaging output
+/build/
+/dist/
+*.egg-info/

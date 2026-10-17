@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from queue import Full, Queue
+from time import monotonic
 
 import numpy as np
 import soundcard as sc
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, Signal
 
 from core.config import AppConfig
 from core.events import EventBus
@@ -96,11 +97,14 @@ def normalized_rms(samples: np.ndarray, full_scale: float = 0.25) -> float:
 class LoopbackCapture(QThread):
     """Records short chunks, emits RMS on the fast path, then queues audio for Whisper."""
 
+    device_resolved = Signal(object)
+
     def __init__(self, config: AppConfig, events: EventBus, queue: Queue) -> None:
         super().__init__()
-        self._config = config
+        self._config = replace(config)
         self._events = events
         self._queue = queue
+        self.stop_requested = False
 
     def run(self) -> None:
         try:
@@ -110,10 +114,7 @@ class LoopbackCapture(QThread):
             return
 
         kind = "loopback" if getattr(mic, "isloopback", False) else "mic"
-        self._config.audio_device_id = _mic_id(mic)
-        self._config.audio_device_name = mic.name
-        self._config.audio_device_kind = kind
-        self._events.state_changed.emit(self._config.snapshot())
+        self.device_resolved.emit(AudioSource(_mic_id(mic), mic.name, kind))
         self._events.status_changed.emit(f"Capturing: {mic.name}")
 
         chunk = max(self._config.chunk_samples, 320)
@@ -133,24 +134,24 @@ class LoopbackCapture(QThread):
                 self._events.pipeline_error.emit(f"Capture failed: {exc}")
 
     def _open_recorder(self, mic):
-        rate = self._config.sample_rate
-        try:
-            return mic.recorder(samplerate=rate, channels=1)
-        except Exception:
-            return mic.recorder(samplerate=rate, channels=2)
+        # Record native device channels, then downmix. WASAPI single-channel
+        # recording can yield corrupt input on some Windows devices.
+        return mic.recorder(samplerate=self._config.sample_rate, channels=None)
 
     def _push(self, chunk: np.ndarray) -> None:
         try:
-            self._queue.put_nowait(chunk)
+            self._queue.put_nowait((chunk, monotonic()))
         except Full:
             try:
-                self._queue.get_nowait()
+                dropped = self._queue.get_nowait()
+                self._events.audio_dropped.emit(int(dropped[0].size))
             except Exception:
                 pass
             try:
-                self._queue.put_nowait(chunk)
+                self._queue.put_nowait((chunk, monotonic()))
             except Full:
                 pass
 
     def stop(self) -> None:
+        self.stop_requested = True
         self.requestInterruption()

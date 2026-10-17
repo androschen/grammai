@@ -18,7 +18,10 @@ def thai_with_romanization(text: str) -> tuple[str, str]:
     """Return (Thai script, romanized pronunciation)."""
     from pythainlp.transliterate import romanize
 
-    return text, romanize(text)
+    from pythainlp.tokenize import word_tokenize
+
+    words = word_tokenize(text, engine="newmm", keep_whitespace=False)
+    return text, " ".join(romanize(word) if contains_thai(word) else word for word in words)
 
 
 def contains_cjk(text: str) -> bool:

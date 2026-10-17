@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -63,6 +63,7 @@ class OverlayHUD(QWidget):
 class SubtitleOverlay(QWidget):
     def __init__(self, events: EventBus, config: AppConfig) -> None:
         super().__init__(None)
+        self._config = config
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -93,16 +94,16 @@ class SubtitleOverlay(QWidget):
             return
         geo = screen.availableGeometry()
         width = int(geo.width() * 0.72)
-        height = 210
+        height = min(geo.height() - 64, max(210, self.layout().heightForWidth(width)))
         x = geo.x() + (geo.width() - width) // 2
-        y = geo.y() + geo.height() - height - 48
+        y = geo.y() + 24 if self._config.overlay_position == "top" else geo.y() + geo.height() - height - 48
         self.setGeometry(x, y, width, height)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 170))
+        painter.setBrush(QColor(0, 0, 0, self._config.overlay_opacity))
         painter.drawRoundedRect(self.rect().adjusted(8, 8, -8, -8), 12, 12)
         super().paintEvent(event)
 
@@ -113,10 +114,19 @@ class SubtitleOverlay(QWidget):
     @Slot(object)
     def apply_subtitle(self, update: SubtitleUpdate) -> None:
         self._stack.apply(update)
+        if not self._config.show_pronunciation:
+            self._stack.phonetics.hide()
+            self._stack.native_phonetics.hide()
+        QTimer.singleShot(0, self, self._place_at_bottom)
 
     @Slot(object)
     def apply_state(self, state: AppState) -> None:
         self._hud.apply_state(state)
+        self._stack.target.setFont(QFont("Microsoft YaHei", self._config.subtitle_font_size, QFont.Weight.DemiBold))
+        self._stack.phonetics.setVisible(self._config.show_pronunciation and bool(self._stack.phonetics.text()))
+        self._stack.native_phonetics.setVisible(self._config.show_pronunciation and bool(self._stack.native_phonetics.text()))
+        self._place_at_bottom()
+        self.update()
 
     def reset_text(self) -> None:
         self._stack.reset()
