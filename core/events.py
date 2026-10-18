@@ -21,9 +21,11 @@ class SubtitleUpdate:
     audio_id: str = ""
     source_language: str = "unknown"
     target_language: str = "en"
+    suggested_translation: str = ""
     original_native_text: str | None = None
     original_target_text: str | None = None
     revision_count: int = 0
+    ai_refined: bool = False
     audio_overlap_seconds: float = 0.
     overlap_previous_text: str = ""
 
@@ -62,6 +64,7 @@ class EventBus(QObject):
     benchmark_progress = Signal(str)
     benchmark_finished = Signal(object)
     benchmark_busy = Signal(bool)
+    phrase_explain_requested = Signal(object)
     learning_requested = Signal(object)
     review_requested = Signal(object)
     review_finished = Signal(object)

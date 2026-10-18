@@ -39,7 +39,7 @@ def load_config() -> AppConfig:
     # Capture format is internal; only restore user-facing preferences.
     names = {"target_language", "source_language", "audio_device_id", "audio_device_name",
              "audio_device_kind", "noise_threshold", "quality_mode", "cpu_threads",
-             "translation_enabled", "translation_threads", "backend", "vulkan_executable", "vulkan_model",
+             "translation_mode", "translation_enabled", "translation_threads", "backend", "vulkan_executable", "vulkan_model",
              "theme", "show_overlay", "show_pronunciation", "subtitle_font_size", "overlay_opacity",
              "overlay_position", "analysis_enabled", "analysis_endpoint", "analysis_model", "analysis_key_env",
              "analysis_provider", "analysis_executable", "analysis_gguf", "analysis_context_tokens",
@@ -64,6 +64,8 @@ def load_config() -> AppConfig:
             setattr(config, name, value)
         except (TypeError, ValueError):
             continue
+    if config.translation_mode not in ("fast", "context", "review"):
+        config.translation_mode = "fast"
     if config.theme not in ("dark", "light"):
         config.theme = "dark"
     config.cpu_threads = max(1, min(16, config.cpu_threads))

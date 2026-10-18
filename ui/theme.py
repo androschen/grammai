@@ -73,7 +73,12 @@ QFrame#HistoryCard[featured="true"] { background: #1c2b25; border-color: #3b5747
 QFrame#HistoryCard QLabel#phonetic { color: #a5c5b2; font-size: 12px; }
 QFrame#HistoryCard QLabel#target { color: #f1f8f4; font-size: 13px; font-weight: 600; }
 QFrame#HistoryCard[featured="true"] QLabel#target { font-size: 22px; }
+QFrame#HistoryCard QLabel#target[hasSuggestion="true"] { color: #99aca1; font-size: 12px; font-weight: 400; }
+QFrame#HistoryCard QLabel#aiSuggestionText { color: #f1f8f4; font-size: 13px; font-weight: 600; }
+QFrame#HistoryCard QLabel#aiSuggestionTag { color: #a5c5b2; background: #20352c; border: 1px solid #3b5747; border-radius: 4px; padding: 1px 4px; font-size: 10px; }
+
 QFrame#HistoryCard QLabel#native { color: #99aca1; font-size: 12px; }
+QFrame#HistoryCard QLabel#sourceLanguageBadge { color: #a5c5b2; background: #20352c; border: 1px solid #3b5747; border-radius: 4px; padding: 2px 5px; font-size: 10px; font-weight: 600; }
 QFrame#HistoryCard QPushButton { background: transparent; color: #a3bfaf; border: none; border-radius: 5px; padding: 3px 6px; font-size: 11px; }
 QFrame#HistoryCard QPushButton:hover, QFrame#HistoryCard QPushButton:checked { background: #34493e; color: #def6e7; }
 """
@@ -83,6 +88,42 @@ QFrame#sentenceSource { background: #1b2322; border: 1px solid #2c3933; border-r
 QFrame#sentenceTranslation { background: #1c2b25; border: 1px solid #3b5747; border-radius: 16px; }
 QFrame#sentenceSource QLabel, QFrame#sentenceTranslation QLabel { border: none; background: transparent; }
 QTextBrowser { background: #171e1e; border: 1px solid #33403b; border-radius: 10px; padding: 10px; }
+"""
+
+APP_STYLE += """
+QFrame#navigationRail { background: #191f20; border: none; }
+QLabel#railBrand { font-size: 22px; font-weight: 600; min-height: 40px; }
+QPushButton#iconButton { padding: 5px; border: none; border-radius: 9px; background: transparent; }
+QPushButton#iconButton:hover, QPushButton#iconButton:checked { background: #2a4236; }
+QFrame#HistoryCard { background: transparent; border: none; border-radius: 0; }
+QFrame#HistoryCard QLabel#originalSpeech { font-size: 16px; font-weight: 500; }
+QFrame#HistoryCard QLabel#target { font-size: 13px; font-weight: 400; }
+QFrame#HistoryCard QLabel#refinementHint { color: #a5c5b2; font-size: 10px; }
+"""
+
+APP_STYLE += """
+QDialog QLabel#title { font-size: 20px; font-weight: 600; }
+QDialog QPushButton { padding: 6px 10px; border-radius: 7px; }
+QDialog QComboBox, QDialog QSpinBox, QDialog QLineEdit { padding: 5px 9px; min-height: 20px; border-radius: 7px; }
+QDialog QTabBar::tab { padding: 7px 10px; margin-right: 3px; }
+QListWidget#settingsNavigation { border: none; padding: 2px; background: transparent; }
+QListWidget#settingsNavigation::item { padding: 11px 8px; border: none; }
+QFrame#HistoryCard QLabel#revisionBadge { background: transparent; border: none; padding: 0; }
+"""
+
+APP_STYLE += """
+QFrame#HistoryCard { border-bottom: 1px solid #293233; }
+QFrame#HistoryCard QLabel#originalSpeech { font-size: 15px; font-weight: 500; }
+QFrame#HistoryCard QLabel#phonetic { font-size: 12px; }
+"""
+
+APP_STYLE += """
+QTextBrowser#translationHistory { background: transparent; border: none; padding: 0; }
+"""
+
+APP_STYLE += """
+QFrame#sentenceReadingSection, QFrame#sentenceTranslationSection { background: #191f20; border: 1px solid #293233; border-radius: 9px; }
+QFrame#sentenceHistorySection { background: transparent; border: none; border-top: 1px solid #33403b; }
 """
 
 _LIGHT = {

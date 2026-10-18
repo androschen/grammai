@@ -8,7 +8,9 @@ from time import monotonic
 from threading import Event
 
 import numpy as np
-import soundcard as sc
+# Import soundcard only after QApplication has initialized Windows OLE on the
+# UI thread. Importing it at module load selects MTA first and breaks Qt's
+# clipboard (which needs STA), including standard text-editor Copy actions.
 from PySide6.QtCore import QThread, Signal
 
 from core.config import AppConfig
@@ -30,6 +32,7 @@ def _mic_id(mic) -> str:
 
 
 def list_audio_sources() -> list[AudioSource]:
+    import soundcard as sc
     sources: list[AudioSource] = []
     seen: set[str] = set()
     for mic in sc.all_microphones(include_loopback=True):
@@ -44,6 +47,7 @@ def list_audio_sources() -> list[AudioSource]:
 
 def find_loopback_microphone():
     """Prefer the default speaker's loopback so we hear system audio, not the mic."""
+    import soundcard as sc
     speaker = sc.default_speaker()
     if speaker is None:
         raise RuntimeError("No default playback device found.")
@@ -67,6 +71,7 @@ def find_loopback_microphone():
 
 
 def resolve_microphone(config: AppConfig):
+    import soundcard as sc
     if config.audio_device_id:
         for mic in sc.all_microphones(include_loopback=True):
             if _mic_id(mic) == config.audio_device_id:

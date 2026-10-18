@@ -16,11 +16,19 @@ class StudyDialog(QDialog):
         self._proposal=None
         from ui.sentence_view import build_details
         build_details(self,update,store,analysis,history)
+        events.subtitle_corrected.connect(self._external_update)
+
+    def _external_update(self,update):
+        if update.uid==self.subtitle.uid and not self._busy and self._proposal is None and self.text.toPlainText()==self.subtitle.native_text:
+            self.subtitle=update
+            self.text.setPlainText(update.native_text)
+            self._show_result()
 
     def _apply_analysis(self,update):
         self._proposal=None
         self.apply_recheck.hide()
         self.subtitle=update
+        self.text.setPlainText(update.native_text)
         self._show_result()
         self.events.subtitle_corrected.emit(update)
 
@@ -32,7 +40,7 @@ class StudyDialog(QDialog):
     def _show_revision(self):
         label=revision_label(self.subtitle)
         self.revision.setText((label+' — revised, not verified correct.') if label else 'Original live version; no text changes applied.')
-        self.compare_toggle.setVisible(bool(self.subtitle.revision_count))
+
         self.original.setPlainText('First transcript\n'+(self.subtitle.original_native_text or '')+
             '\n\nFirst translation\n'+(self.subtitle.original_target_text or ''))
 
@@ -93,7 +101,7 @@ class StudyDialog(QDialog):
         self.target.setEnabled(True)
         if self.analysis_widget:
             self.analysis_widget.run.setEnabled(True)
-        self.save.setEnabled(True)
+        self.save.setEnabled(self.reviewed.isChecked() and self._proposal is None)
         if 'error' in result:
             self.feedback.setText('Retranslation failed: '+result['error'])
         else:
@@ -109,6 +117,7 @@ class StudyDialog(QDialog):
                 self.apply_recheck.setVisible(changed)
                 self.apply_recheck.setEnabled(changed)
                 if not changed:
+                    self._proposal=None;self._show_result()
                     self.revision.setText('Recheck found no text changes.')
                 mode='Audio recheck' if result.get('mode')=='audio' else 'Text-only retranslation; audio was not available'
                 self.feedback.setText(mode+f" ({result.get('duration_ms',0)/1000:.1f}s). "+('Apply only after reviewing the suggestion.' if changed else 'No text changes.'))
@@ -122,16 +131,35 @@ class StudyDialog(QDialog):
             self.feedback.setText(f'{mode} finished in {duration:.1f}s. '+('Revision retained in session history; review before trusting it.' if changed else 'No text changes.'))
 
     def _save(self):
+        def report(text):
+            self.feedback.setText(text);self.learning_feedback.setText(text)
+        if self._busy or self._proposal is not None or getattr(self,'_save_stale',False):
+            report('Review the current sentence and confirm it before saving.');return
+        if not self.subtitle.native_text.strip() or not self.subtitle.target_text.strip() or self.subtitle.translation_status=='unavailable':
+            report('A transcript and an available meaning are required before saving.');return
         if (self.text.toPlainText().strip()!=self.subtitle.native_text or self.target.currentData()!=self.subtitle.target_language or (self.source.currentData() is not None and self.source.currentData()!=self.subtitle.source_language)):
-            self.feedback.setText('Translate the corrected transcript before saving it with a translation.')
+            report('Translate the corrected transcript before saving it with a translation.')
             return
+        if not self.reviewed.isChecked():
+            report('Confirm that you checked the original sentence and its meaning before saving.');return
         try:
-            self.phrasebook.save(self.subtitle,self.notes.toPlainText())
-            self.feedback.setText('Saved as text only. Open Saved phrases from the main window.')
+            from dataclasses import replace
+            from ml.phonetics import phonetics_auto
+            meaning=self.save_meaning.toPlainText().strip()
+            if not meaning or len(meaning)>4000:raise ValueError('Enter a meaning of 1–4,000 characters.')
+            value=replace(self.subtitle,target_text=meaning,phonetics=phonetics_auto(meaning))
+            self.phrasebook.save(value,self.notes.toPlainText(),reviewed=True)
+            report('Saved as text only. Open Learning deck from the main window.')
         except (ValueError,OSError) as exc:
-            self.feedback.setText(str(exc))
+            report(str(exc))
+
 
     def done(self,result):
+        try:
+            self.events.subtitle_corrected.disconnect(self._external_update)
+        except (TypeError,RuntimeError):
+            pass
+        self.save_popup.reject()
         if self.analysis_widget:
             self.analysis_widget.dispose()
         self.events.replay_requested.emit("",1.)
@@ -142,57 +170,4 @@ class StudyDialog(QDialog):
         super().done(result)
 
 
-class PhrasebookDialog(QDialog):
-    def __init__(self,config,phrasebook,parent=None):
-        super().__init__(parent)
-        self.phrasebook=phrasebook
-        self.setWindowTitle('Saved phrases')
-        self.setStyleSheet(style_for(config.theme))
-        self.resize(680,560)
-        layout=QVBoxLayout(self)
-        title=QLabel('Your phrasebook')
-        title.setObjectName('title')
-        layout.addWidget(title)
-        self.summary=QLabel()
-        layout.addWidget(self.summary)
-        self.list=QListWidget()
-        self.list.currentRowChanged.connect(self._select)
-        layout.addWidget(self.list,1)
-        self.detail=QPlainTextEdit()
-        self.detail.setReadOnly(True)
-        layout.addWidget(self.detail,1)
-        row=QHBoxLayout()
-        delete=QPushButton('Delete selected')
-        delete.clicked.connect(self._delete)
-        row.addWidget(delete)
-        row.addStretch()
-        close=QPushButton('Close')
-        close.clicked.connect(self.accept)
-        row.addWidget(close)
-        layout.addLayout(row)
-        self._reload()
-
-    def _reload(self):
-        self.items=self.phrasebook.items()
-        self.list.clear()
-        for item in self.items:
-            self.list.addItem(item.get('target_text') or item.get('native_text',''))
-        self.summary.setText(f'{len(self.items)} / 1,000 phrases. Text only, with a 2 MB total limit.')
-        if self.items:
-            self.list.setCurrentRow(0)
-        else:
-            self.detail.setPlainText('No saved phrases yet. Open Study on a subtitle to save one.')
-
-    def _select(self,index):
-        if 0<=index<len(self.items):
-            item=self.items[index]
-            self.detail.setPlainText('\n'.join(item.get(k,'') for k in ('phonetics','target_text','native_phonetics','native_text','notes')))
-
-    def _delete(self):
-        index=self.list.currentRow()
-        if 0<=index<len(self.items):
-            try:
-                self.phrasebook.delete(self.items[index]['id'])
-                self._reload()
-            except OSError as exc:
-                QMessageBox.warning(self,'Could not delete',str(exc))
+from ui.deck import LearningDeckDialog as PhrasebookDialog

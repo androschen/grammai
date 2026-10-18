@@ -63,7 +63,7 @@ class StorageWidget(QWidget):
         for label in (self.ram,self.phrases,self.models,self.benchmarks):
             label.setWordWrap(True)
         form.addRow('Replay audio (RAM only)',self.ram)
-        form.addRow('Saved phrases (text only)',self.phrases)
+        form.addRow('Learning deck (text only)',self.phrases)
         form.addRow('Benchmark summaries',self.benchmarks)
         form.addRow('Local models',self.models)
         layout.addLayout(form)
@@ -75,7 +75,7 @@ class StorageWidget(QWidget):
         clear.setEnabled(replays is not None)
         clear.clicked.connect(events.replay_clear_requested.emit)
         layout.addWidget(clear)
-        phrases=QPushButton('Delete all saved phrases...')
+        phrases=QPushButton('Delete all learning cards...')
         phrases.clicked.connect(self._clear_phrases)
         layout.addWidget(phrases)
         benchmarks=QPushButton('Clear benchmark summaries')

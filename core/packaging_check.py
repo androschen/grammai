@@ -29,6 +29,25 @@ def smoke_check(report,verify_models=False):
         dialog.show();QApplication.processEvents()
         results['details']='ok';dialog.reject();dialog.deleteLater()
         overlay=SubtitleOverlay(events,AppConfig());overlay.close();results['overlay']='ok'
+        from ui.translation_compare import TranslationComparisonDialog
+        comparison=TranslationComparisonDialog(AppConfig(),events)
+        comparison.reject();comparison.deleteLater();results['comparison_ui']='ok'
+        from ui.settings import SettingsDialog
+        settings=SettingsDialog(AppConfig(),events)
+        assert settings._translation_mode.count()==3
+        settings.reject();settings.deleteLater();results['translation_settings']='ok'
+        from ui.deck import LearningDeckDialog
+        from core.phrasebook import Phrasebook
+        deck=LearningDeckDialog(AppConfig(),Phrasebook())
+        deck.reject();deck.deleteLater();results['learning_deck_ui']='ok'
+        from ui.phrase_explain import PhraseExplanationDialog
+        from core.analysis import AnalysisService
+        phrase_service=AnalysisService(events=events,config=AppConfig())
+        phrase=PhraseExplanationDialog(AppConfig(),events,phrase_service,
+            {'phrase':'gua','sentence':'gua beli nasi dulu','language':'id','original_text':'gua beli nasi dulu','original_language':'id'},Phrasebook())
+        # Do not process the queued automatic explanation during a UI-only smoke.
+        phrase.reject();phrase.deleteLater();phrase_service.shutdown()
+        results['phrase_explanation_ui']='ok'
         results['existing_speech_model']=installed_paths()[1].is_file()
         results['existing_context_model']=managed_paths()[1].is_file()
         if verify_models:
@@ -53,6 +72,32 @@ def smoke_check(report,verify_models=False):
                 results['translation']=translator.translate('Hello','en','id')
                 runtime.ensure_loaded(config,lambda message:None,lambda:False)
                 results['gpu_context']=runtime.status
+                from core.translation_compare import compare_translations
+                results['translation_comparison']=compare_translations(config,
+                    {'text':'gua beli nasi dulu','source':'id','target':'en'},runtime)['results']
+                if any('error' in record for record in results['translation_comparison']):
+                    raise RuntimeError('Packaged translator comparison failed')
+                from ml.live_translator import LiveTranslator
+                from core.analysis import AnalysisWorker
+                live=LiveTranslator(replace(config,translation_mode='context'),translator,runtime,events)
+                live.ensure_loaded()
+                results['context_translation']=live.translate('gua beli nasi dulu','id','en')
+                live.remember('We are buying lunch.','en')
+                results['context_translation_with_dialogue']=live.translate('gua beli nasi dulu','id','en')
+                reviewed=[]
+                worker=AnalysisWorker(config,{'text':'gua beli nasi dulu','source':'id','target':'en',
+                    'context':[]},runtime,'refine')
+                worker.result.connect(reviewed.append);worker.run()
+                if not reviewed or 'error' in reviewed[0]:
+                    raise RuntimeError('Packaged automatic review failed')
+                results['review_translation']=reviewed[0]['translation']
+                from ml.phrase_explanation import explain
+                results['phrase_explanation']=explain(config,
+                    {'phrase':'gua','sentence':'gua beli nasi dulu','language':'id',
+                     'original_text':'gua beli nasi dulu','original_language':'id'},runtime)
+                if results['phrase_explanation']['meaning'].strip().casefold()=='gua':
+                    raise RuntimeError('Packaged explanation repeated the phrase without defining it')
+                live.close()
             finally:
                 engine.close();translator.close();runtime.close()
         results['ok']=all(results[key] for key in ('chinese_pronunciation','thai_pronunciation','vad_silence'))

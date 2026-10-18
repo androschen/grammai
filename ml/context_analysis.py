@@ -122,7 +122,7 @@ def analyze(config, payload, runtime=None, progress=lambda message: None, cancel
     validate_endpoint(config.analysis_endpoint)
     key = os.environ.get(config.analysis_key_env,'').strip()
     if not key or not config.analysis_model.strip():
-        raise ValueError('Set the online model and API-key environment variable in Settings > Analysis.')
+        raise ValueError('Set the online model and API-key environment variable in Settings > Understanding.')
     request = urllib.request.Request(config.analysis_endpoint,
         data=json.dumps(body).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
     # Refuse redirects so credentials cannot be forwarded to a different endpoint.

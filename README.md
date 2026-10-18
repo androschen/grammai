@@ -1,15 +1,107 @@
 # GrammAI
 
+Local Windows transcription, translation, pronunciation, and language learning.
+
+**Current version: [v0.7.1](https://github.com/androschen/grammai/tree/v0.7.1)**
+
+![GrammAI 0.7.1 conversation workspace and sentence history](docs/images/grammai-desktop.png)
+
+*Real PySide6 UI rendered with sample sentences. No personal conversations, recordings, device names, or credentials are included.*
+
+## What's new in 0.7.1
+
+- Compact conversation workspace with a direct audio-device dropdown and a live noise-threshold meter.
+- Inverted **CC** subtitle toggle and one dynamic sun/moon theme button.
+- Local AI translation refinement with an icon marking revised sentences; original transcripts and first translations are preserved.
+- Sentence details with clearly separated, top-aligned sections and visible highlighted translation history.
+- A separate **Meaning & context** page and a standalone, reviewed **Save to deck** popup.
+- Text selection, right-click Copy, and Ctrl+C; Chinese pinyin and Thai pronunciation.
+- Saved phrases and lightweight practice without additional model calls.
+
+The 0.7.1 layout fix keeps sentence sections in place as the panel height changes. **148 automated tests pass.**
+
+![Sentence details with visible first/current translation comparison](docs/images/grammai-sentence.png)
+
+![Standalone reviewed Save to deck popup](docs/images/grammai-save.png)
+
+See [release notes](CHANGELOG.md) and [Windows setup](WINDOWS.md). Model weights, private preferences, recordings, saved cards, caches, and build outputs are excluded from Git.
+
+### Learning tools (0.5.0)
+
+Select a word or short phrase in **History** or **Sentence details**, right-click,
+and choose **Explain selected phrase locally**. The existing Qwen model explains
+its meaning and tone in your configured explanation language. Chinese pinyin and
+Thai romanization come from the existing local pronunciation helpers. Selected
+translation text is labelled as a translation, never treated as proof of the
+original speech. AI explanations and examples may still be wrong; check them
+before saving learning material.
+
+Explanations are explicit, local-only requests: at most 120 selected characters,
+a short sentence/original window, two short earlier transcript snippets, and 384
+output tokens, without deep reasoning. Small context configurations drop earlier
+dialogue. Repeating the same request reuses the shared 80-entry session cache.
+One Qwen instance is shared with translation/analysis. Automatic reviews yield
+while the explanation window is open. Context-aware live subtitles must be paused
+explicitly before a phrase explanation; restart them afterward. No new model is
+downloaded and no explanation is written to disk automatically.
+
+Use the **bookmark in Sentence details** to save the accepted original, meaning,
+pronunciation and optional notes. You must confirm that you checked the sentence
+and its meaning. Pending AI revisions are never saved implicitly. A phrase can
+also be saved after reviewing its explanation. The **Saved phrases** bookmark icon on the main
+window supports search, language filters, editing and deletion. Existing saved
+phrases remain available but require your confirmation before entering practice.
+
+The **Practice** tab reveals pronunciation and meaning after recall. It uses no
+model or audio files and selects at most 10 due, reviewed cards. Again schedules
+10 minutes; Remembered starts at one day, then doubles up to 365 days. Edited
+wording resets its practice schedule. This is a lightweight recall schedule,
+not a full Anki scheduler. The existing hard limits remain: **1,000 cards and
+2 MB total**, text only. Cards persist locally until deleted; session history,
+explanations and replay audio retain their existing RAM-only lifetimes.
+
+### Translation modes (0.4.0)
+
+Open **Settings > Translation** and choose **Fast**, **Context-aware**, or
+**Fast + review**, then Apply. Fast remains the default and uses NLLB CPU/int8.
+Context-aware uses the installed local Qwen GPU model, with at most three earlier
+original transcript snippets (240 characters each). It falls back to NLLB for the
+rest of the run if local inference fails. Stop/restart subtitles to retry Qwen.
+Speech recognition remains a separate setting; text review cannot prove what was
+spoken or repair missing audio.
+
+Fast + review shows NLLB subtitles immediately and reviews completed sentences
+locally in the background. It keeps only one active and one pending review;
+new speech replaces older pending work. A completed review updates the translation
+in the conversation list automatically and marks it with an **AI refinement icon**. The original
+speech stays unchanged, and **Translation history** in sentence details retains
+the first translation. There are no Apply/Dismiss actions for automatic review.
+AI refined means reviewed by a model, not verified correct. History and context
+remain bounded and RAM-only. Failed
+reviews back off for 30 seconds while live subtitles continue.
+
+**Settings > Understanding** now shows the explanation switch, explanation
+language, model status and GPU test first. Model files, conversation preferences,
+and optional online explanations are under Advanced. Live Qwen translation and
+automatic review always stay local, regardless of the optional explanation provider.
+The existing Qwen instance is shared and tasks are serialized; stop context-aware
+subtitles before using manual model tasks. No new models are downloaded implicitly.
+The translator comparison lives under **Translation > Advanced** and still tests
+the same single sentence without dialogue. The fixed speech benchmark and manual
+audio Recheck continue to use their NLLB translation baseline.
+
+History supports search across the original transcript, translation and
+pronunciation, plus filtering by original speech language. Clear removes the
+session text; quitting clears it as before. Model choices are saved locally.
+
 Windows desktop subtitles with local transcription, translation and pronunciation.
 
-![GrammAI desktop app with compact session history, Chinese pronunciation, and sentence details](docs/images/grammai-desktop.png)
 
-*Actual application UI rendered with sample sentences; no personal conversations or recordings are shown.*
 
 ## Run
 
-Windows users can run `dist/GrammAI-Setup-0.2.0.exe` and launch **GrammAI** from
-the Start menu or desktop. The portable alternative is `dist/GrammAI-Portable-0.2.0.zip`; extract it and
+Windows users can run `dist/GrammAI-Setup-0.7.1.exe` and launch **GrammAI** from
+the Start menu or desktop. The portable alternative is `dist/GrammAI-Portable-0.7.1.zip`; extract it and
 launch `GrammAI/GrammAI.exe` (keep its whole folder). Python is bundled; model weights remain separate.
 See [Windows installation and builds](WINDOWS.md).
 
@@ -25,6 +117,46 @@ subtitles** controls the overlay independently; session history continues when t
 overlay is hidden. The live audio meter works before translation starts.
 
 ## Settings
+
+### Compare local translators
+
+Open **Settings > Translation > Advanced > Compare NLLB and local Qwen**. Stop live subtitles
+using the comparison window's stop button, wait for the active model task to
+finish, then select a starter example or enter up to 1,000 transcript characters.
+Choose the original and target languages and select **Compare translations**.
+Both engines receive exactly the same single sentence, without previous
+translations, conversation history, glossary hints or saved examples.
+
+NLLB uses the existing CPU/int8 cache; Qwen uses the existing local GGUF/Vulkan
+runtime from Settings > Understanding even if the analysis provider is set to Online.
+This tool never sends text online, downloads weights, fine-tunes a model, or
+changes the live translator. Missing models produce an error for that engine;
+the other engine can still return its result. Loading/reuse and translation
+times are shown separately. These are not end-to-end subtitle delays.
+
+Rate meaning as correct, partly correct or wrong. Up to 40 comparisons and their
+ratings remain in the comparison window's RAM only; closing it clears them.
+Cancellation interrupts the shared local worker. Live inference, audio rechecks
+and speech benchmarks cannot start during a comparison. The shared Qwen model
+uses the existing idle-unload setting after comparisons finish.
+
+Initial local tests reproduced the Indonesian pronoun error: NLLB translated
+`gua beli nasi dulu` as "The cave bought the rice first."; Qwen returned
+"I'll buy rice first." Both preserved the cave meaning in `Ada gua di gunung itu.`
+Other slang/idiom outputs remained imperfect. Eight starter examples are
+diagnostics, not an accuracy percentage or proof that Qwen should replace NLLB.
+Fast remains the default; select another live mode under Settings > Translation.
+
+Run the same public-only diagnostics from source:
+
+```powershell
+python -m scripts.compare_translators --samples 8
+```
+
+This CLI writes only its public starter results to ignored
+`models/translation-comparison.json`; stop other inference first when timing it.
+
+### App configuration
 
 - **Audio**: desktop loopback or microphone, live input level, draggable noise gate.
 - **Languages**: spoken/target languages and overlay pronunciation visibility.
@@ -43,13 +175,14 @@ Translation uses NLLB-200 distilled 600M with CPU int8 in every preset.
 
 Preferences and the last 20 benchmark summaries are saved under
 `%LOCALAPPDATA%\GrammAI`. The latest 80 subtitle entries remain RAM-only and are
-cleared on Quit. Compact history rows show each sentence with its timestamp; Details opens pronunciation and the original text. History supports text selection,
+cleared on Quit. Compact history rows show each sentence with its timestamp and original-speech language badge (CN, EN, TH or ID; ?? when unknown); Details opens pronunciation and the original text. History supports text selection,
 Clear and optional auto-scroll. Closing the window hides it to the system tray
 when available; use **Quit GrammAI** in the tray to exit.
 
 ## Sentence details and manual recheck
 
-Each compact history row has one **Details** action. It opens a resizable side panel with pronunciation,
+History, sentence details, pronunciation and analysis results support text selection. Right-click for Copy, or press Ctrl+C to copy the selection (the entire text block if nothing is selected). Ctrl+A selects the text block. The floating subtitle overlay remains click-through.
+**Details** opens a resizable side panel with pronunciation,
 original audio replay (normal or 0.8x), editable source text, translation and
 optional source-first **Meaning & context**. Original speech and translation are
 reading cards; **Edit transcript** reveals editing, while **Compare original**
@@ -257,8 +390,8 @@ new subtitle sessions and audio/source changes start a fresh context group.
 
 ### Fully local GPU analysis
 
-Settings > Analysis defaults to **Local GPU**. Live Whisper/NLLB behavior stays
-independent. Local analysis uses an app-owned llama.cpp Vulkan server bound to
+Settings > Understanding > Advanced defaults to **Local GPU** for explanations.
+The selected live translation mode is configured separately. Local analysis uses an app-owned llama.cpp Vulkan server bound to
 127.0.0.1, a random in-memory API key and proxy bypass. It runs with offline mode
 and no tools/web UI. Conversation data never goes to an external service in
 local mode, and errors never trigger an online fallback.
@@ -278,7 +411,7 @@ layer offloading. It reports errors instead of silently loading on CPU. Use
 Multilingual quality varies; compare actual examples before choosing a larger
 model. More VRAM is needed than the GGUF file size alone.
 
-Settings > Analysis > Conversation controls casual/neutral/formal speech,
+Settings > Understanding > Advanced > Conversation controls casual/neutral/formal speech,
 preserve-tone/natural/literal translation, explanation language (Indonesian by
 default), context sentence count (0-5), deeper local reasoning, slang explanations, and a personal
 glossary. Settings and explicitly saved examples persist locally in preferences;
@@ -376,3 +509,23 @@ saving preferences. Apply saves the current choices; Cancel restores the last
 applied appearance. Older saved opacity values are retained within the expanded
 0-255 internal alpha range. Preview changes do not change the app theme until
 Apply. Pronunciation visibility is shared with Languages settings.
+
+### Compact conversation workspace (0.7.1)
+
+The main window uses an icon rail for conversation, saved phrases, performance and settings. Hover for tooltips; each icon also has an accessible name. Audio and language controls open from the session bar. Search and language filters expand from the history search icon. Original speech, pronunciation and translation share one compact entry instead of repeating the latest subtitle.
+
+In **Fast + review** mode, local AI automatically refines the translation in session history, preserving the original transcript and first translation under **Translation history** in sentence details. **AI refined** means reviewed by a model, not verified correct. Fast mode stays available without background review. Refinement uses the existing bounded review queue, with no additional model pass. Select a phrase and use the context menu to explain it locally; saving to the deck still requires checking the meaning. Resources and model controls remain in Settings.
+
+In 0.7.1 the top-right **Subtitles on/off** control shows or hides only the floating overlay. Capture and session history continue. Automatically refined history entries use a small AI icon with a tooltip instead of another text row; manual revisions have a separate edit icon. Settings uses category navigation with advanced audio timing collapsed. Saved phrases, sentence tools and phrase explanations share compact controls with accessible names and tooltips.
+
+### Conversation controls (0.7.1)
+
+The top-right **CC** icon shows or hides floating subtitles without stopping capture. An underline indicates enabled subtitles; hover for Show/Hide. The single theme button shows a sun in dark mode and a moon in light mode, indicating the mode clicking will switch to. The choice is saved using existing preferences. The session bar displays the selected audio device, with its full name in a tooltip. Conversation rows align original text, pronunciation and translation consistently; refinement icons sit beside translations without shifting the original text column.
+
+In 0.7.1 audio selection is a direct dropdown in the session bar. CC uses an outlined icon when off and an inverted filled icon when on, with no red underline. A sliders icon beside the level meter opens Audio settings; its tooltip reports the current noise threshold. The threshold marker remains visible on the meter.
+
+### Sentence learning panel (0.7.1)
+
+Sentence details have two pages: **Sentence** and **Meaning & context**. The Sentence page groups original speech, pronunciation and translation without repeated boxes. Identical source and translation are displayed once. Changed transcripts/translations show a visible first/current comparison with highlights; unchanged sentences omit it. Replay and speed are in the header, with transcript tools under the tools icon. Meaning & context is an explicit request using the existing original-speech analysis pipeline; opening pages does not run AI.
+
+The bookmark opens a separate **Save to deck** popup. Review the original/pronunciation, edit the saved meaning, optionally add notes, and confirm before saving. Edited meaning is saved only to the deck; it does not overwrite the live translation. If the sentence changes while saving, close and reopen the popup to review the latest version. Closing sentence details also closes its save popup. No additional model, background analysis, or audio storage is introduced.

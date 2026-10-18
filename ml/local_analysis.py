@@ -56,7 +56,7 @@ class LocalAnalysisRuntime:
             return
         self.close()
         if not executable.is_file() or not model.is_file():
-            raise ValueError('Install the local model/runtime or select existing files in Settings > Analysis.')
+            raise ValueError('Install the local model/runtime or select existing files in Settings > Understanding.')
         if model.suffix.lower() != '.gguf':
             raise ValueError('Select a GGUF instruction model.')
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -123,19 +123,39 @@ class LocalAnalysisRuntime:
 
     def complete(self, body, cancelled=lambda: False):
         from ml.context_analysis import parse_response, ANALYSIS_SCHEMA
+        return parse_response(self._complete_raw(body,ANALYSIS_SCHEMA,cancelled,.3))
+
+    def complete_json(self,body,schema,cancelled=lambda:False):
+        """Bounded schema output for local tasks other than contextual analysis."""
+        raw=self._complete_raw(body,schema,cancelled,0.)
+        try:
+            envelope=json.loads(raw)
+            choice=envelope['choices'][0]
+            if choice.get('finish_reason')=='length':
+                raise ValueError('Translation was cut short. Shorten the sentence and try again.')
+            value=json.loads(choice['message']['content'])
+            if not isinstance(value,dict):
+                raise ValueError('Local model returned an invalid translation object.')
+            return value
+        except (KeyError,IndexError,TypeError,json.JSONDecodeError):
+            raise ValueError('Local model returned an invalid translation response.') from None
+
+    def _complete_raw(self,body,schema,cancelled,temperature):
         if not self.loaded:
             raise RuntimeError('Local model is not loaded.')
         if cancelled():
             raise InterruptedError('Analysis cancelled')
-        body = dict(body, model='grammai-local', temperature=.3,
-            response_format={'type': 'json_object', 'schema': ANALYSIS_SCHEMA})
+        body = dict(body, model='grammai-local', temperature=temperature,
+            response_format={'type': 'json_object', 'schema': schema})
         self.last_used = time.monotonic()
         try:
             with self.http.open(self.request('/v1/chat/completions', body), timeout=120) as response:
                 raw = response.read(262145)
             if cancelled():
                 raise InterruptedError('Analysis cancelled')
-            return parse_response(raw)
+            if len(raw)>262144:
+                raise ValueError('Local response exceeded the size limit.')
+            return raw
         except urllib.error.HTTPError as exc:
             if exc.code in (400, 413):
                 raise ValueError('Local request did not fit or was rejected. Shorten the transcript/context, or increase the context limit.') from None

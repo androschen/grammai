@@ -129,6 +129,9 @@ class WhisperEngine:
                 self.activity_callback('Translation')
             target_text = self._translate(native, source, target, audio)
 
+        remember=getattr(self._translator,'remember',None)
+        if remember:
+            remember(native,source)
         self.last_timings.update(mt_ms=(perf_counter() - stt_end) * 1000, total_ms=(perf_counter() - started) * 1000)
         status = "same_language" if source == target_code else "translated"
         if not target_text:
@@ -156,6 +159,8 @@ class WhisperEngine:
                 translated = self._translator.translate(native, source, target.value)
                 if translated:
                     return translated
+            except InterruptedError:
+                raise
             except Exception:
                 pass
         if target is TargetLanguage.ENGLISH:

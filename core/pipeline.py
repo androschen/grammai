@@ -45,6 +45,8 @@ class InferenceWorker(QThread):
 
     def _run(self) -> None:
         # Only this worker accesses the engine; the controller serializes replacements.
+        if hasattr(getattr(self.engine,'_translator',None),'cancelled'):
+            self.engine._translator.cancelled=self.isInterruptionRequested
         self.engine.configure(self.config)
         try:
             self.events.status_changed.emit(f"Loading Whisper {self.config.model_size} ({self.config.backend})…")
@@ -119,12 +121,17 @@ class InferenceWorker(QThread):
                     self.subtitle.emit(update,audio,captured_at)
                 self.events.status_changed.emit("Translation unavailable — Retry models" if update and update.translation_status == "unavailable" else "Listening for speech")
             except Exception as exc:
+                if self.isInterruptionRequested():
+                    return
                 self.events.status_changed.emit(f"Inference failed: {exc}. Use Retry models.")
                 return
 
     def stop(self) -> None:
         self.stop_requested = True
         self.requestInterruption()
+        translator=getattr(self.engine,'_translator',None)
+        if getattr(translator,'claimed',False):
+            translator.runtime.interrupt()
 
 
 class TranslationPipeline(QObject):
@@ -189,8 +196,17 @@ class TranslationPipeline(QObject):
     def sample_rate(self):
         return self._config.sample_rate
 
+    @property
+    def model_tasks_idle(self):
+        return (not self._closing and not self._want_inference and self._worker is None
+            and self._review is None and self._review_pending is None
+            and self._benchmark is None and self._benchmark_pending is None)
+
     @Slot(object)
     def request_benchmark(self, config):
+        if self._events.property('comparison_busy'):
+            self._events.benchmark_progress.emit('Finish or cancel translator comparison first.')
+            return
         if self._closing or self._review is not None or self._review_pending is not None or self._benchmark is not None or self._benchmark_pending is not None:
             return
         self._benchmark_pending = replace(config)
@@ -202,6 +218,9 @@ class TranslationPipeline(QObject):
 
     @Slot(object)
     def request_review(self,request):
+        if self._events.property('comparison_busy'):
+            self._events.review_finished.emit({'id':request['update'].uid,'error':'Finish or cancel translator comparison first.'})
+            return
         analysis=getattr(self._events,'analysis_service',None)
         if analysis is not None and analysis.busy:
             self._events.review_finished.emit({'id':request['update'].uid,'error':'Context analysis is finishing. Try Recheck again shortly.'})
@@ -267,6 +286,10 @@ class TranslationPipeline(QObject):
         self._want_capture = True
 
     def start_inference(self):
+        if self._events.property('comparison_busy'):
+            self._events.status_changed.emit('Finish or cancel translator comparison before starting live subtitles.')
+            self.inference_failed.emit()
+            return
         self._want_capture = self._want_inference = True
 
     def start(self):
@@ -356,6 +379,7 @@ class TranslationPipeline(QObject):
                 interrupted = self._worker.stop_requested
                 self._worker.deleteLater()
                 self._worker = None
+                self._events.setProperty('local_translation_owned',False)
                 if not interrupted:
                     self._want_inference = False
                     self.inference_failed.emit()
@@ -400,7 +424,11 @@ class TranslationPipeline(QObject):
             self._review.result.connect(self._review_result)
             self._review.start()
             return
-        if self._want_inference and self._worker is None and not self._replay_active:
+        if self._want_inference and self._worker is None and not self._replay_active and not self._events.property('comparison_busy'):
+            analysis=getattr(self._events,'analysis_service',None)
+            if self._config.translation_enabled and self._config.translation_mode=='context' and analysis is not None and analysis.busy:
+                return
+            self._events.setProperty('local_translation_owned',self._config.translation_enabled and self._config.translation_mode=='context')
             if self._retry_pending:
                 self._engine.reset_failures()
                 self._retry_pending = False

@@ -107,7 +107,7 @@ class AppearanceTests(unittest.TestCase):
         e.learning_requested.connect(opened.append)
         row.details_button.click()
         self.assertEqual(opened,[update])
-        panel._theme_picker.setCurrentIndex(panel._theme_picker.findData('light'))
+        panel._theme_button.click()
         self.assertEqual(c.theme,'light')
         self.assertEqual(panel.styleSheet(),style_for('light'))
         self.assertEqual(panel._history_panel._card_count(),1)
@@ -152,6 +152,8 @@ class PerformanceTests(unittest.TestCase):
         pipeline=Mock(inference_requested=True,processing_live=True,backlog_seconds=.4,sample_rate=16000,active_backend='CPU / int8')
         events=EventBus()
         monitor=PerformanceMonitor(events,pipeline)
+        monitor.gpu.close()
+        monitor.gpu=Mock();monitor.gpu.sample.return_value={}
         process=Mock()
         process.children.return_value=[]
         process.cpu_percent.return_value=400

@@ -3,6 +3,8 @@ from dataclasses import replace
 
 
 def revised_update(original, **changes):
+    if any(key in changes for key in ('native_text','target_text')):
+        changes.setdefault('suggested_translation','')
     candidate = replace(original, **changes)
     changed = (candidate.native_text, candidate.target_text) != (original.native_text, original.target_text)
     if not changed:
@@ -10,7 +12,8 @@ def revised_update(original, **changes):
     return replace(candidate,
         original_native_text=(original.native_text if original.original_native_text is None else original.original_native_text),
         original_target_text=(original.target_text if original.original_target_text is None else original.original_target_text),
-        revision_count=original.revision_count + 1)
+        revision_count=original.revision_count + 1,
+        ai_refined=changes.get('ai_refined',False))
 
 
 def revision_label(update):

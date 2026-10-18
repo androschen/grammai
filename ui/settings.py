@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QSpinBox, QDoubleSpinBox, QTabWidget, QVBoxLayout, QWidget)
+    QScrollArea, QSpinBox, QDoubleSpinBox, QTabWidget, QVBoxLayout, QWidget, QListWidget)
 from audio.capture import list_audio_sources
 from core.config import AppConfig, TargetLanguage, QualityMode, LANGUAGE_LABELS, SOURCE_LANGUAGE_LABELS, QUALITY_LABELS
 from core.events import EventBus
@@ -21,7 +21,7 @@ class SettingsDialog(QDialog):
         self._sources = []
         self.setWindowTitle('GrammAI - Settings')
         self.setStyleSheet(style_for(config.theme))
-        self.resize(740, 700)
+        self.resize(800, 740)
         self.setMinimumSize(640, 520)
         layout = QVBoxLayout(self)
         title = QLabel('Settings')
@@ -29,11 +29,13 @@ class SettingsDialog(QDialog):
         layout.addWidget(title)
         subtitle=QLabel('A little tuning. A better listening experience.')
         subtitle.setObjectName('hint')
-        layout.addWidget(subtitle)
-        layout.setContentsMargins(24,24,24,24)
-        layout.setSpacing(14)
+        subtitle.hide()
+        layout.setContentsMargins(14,14,14,14)
+        layout.setSpacing(8)
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs, 1)
+        self.categories=QListWidget();self.categories.setObjectName('settingsNavigation');self.categories.setFixedWidth(140);self.categories.setAccessibleName('Settings categories')
+        workspace=QHBoxLayout();workspace.setSpacing(12);workspace.addWidget(self.categories);workspace.addWidget(self.tabs,1);layout.addLayout(workspace,1)
+        self.tabs.tabBar().hide()
         self._audio_page()
         self._language_page()
         self._appearance_page()
@@ -45,6 +47,10 @@ class SettingsDialog(QDialog):
         self.tabs.currentChanged.connect(lambda index:self.storage.set_active(index==4))
         self.tabs.setCurrentIndex(page)
         self._analysis_page()
+        for index in range(self.tabs.count()):self.categories.addItem(self.tabs.tabText(index))
+        self.categories.currentRowChanged.connect(self.tabs.setCurrentIndex)
+        self.tabs.currentChanged.connect(self.categories.setCurrentRow)
+        self.tabs.setCurrentIndex(page);self.categories.setCurrentRow(self.tabs.currentIndex())
         self._feedback = QLabel('Model and device changes take effect when you select Apply. Noise filtering previews live.')
         self._feedback.setObjectName('hint')
         self._feedback.setWordWrap(True)
@@ -67,7 +73,7 @@ class SettingsDialog(QDialog):
     def _page(self, title):
         body = QWidget()
         layout = QVBoxLayout(body)
-        layout.setSpacing(14)
+        layout.setSpacing(8)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -113,26 +119,38 @@ class SettingsDialog(QDialog):
         timing.addRow('Speech segment target',self._speech_max)
         timing.addRow('Pause before final subtitle',self._speech_silence)
         timing.addRow('Overlap at continuous-speech cuts',self._speech_overlap)
-        layout.addLayout(timing)
+        timing_host=QWidget();timing_layout=QVBoxLayout(timing_host);timing_layout.setContentsMargins(0,0,0,0);timing_layout.addLayout(timing)
+        timing_toggle=QPushButton('Advanced timing');timing_toggle.setCheckable(True);timing_toggle.toggled.connect(timing_host.setVisible);layout.addWidget(timing_toggle);layout.addWidget(timing_host);timing_host.hide()
         hint=QLabel('The noise threshold controls when speech starts. Speech detection preserves quieter syllables afterward. Shorter pauses reduce delay; very short segments can reduce recognition accuracy. Speech-aware targets of 4 seconds or more allow up to 0.8 seconds of extra endpoint buffering.')
         hint.setWordWrap(True)
         hint.setObjectName('hint')
-        layout.addWidget(hint)
+        timing_layout.addWidget(hint)
         layout.addStretch()
 
     def _language_page(self):
-        layout = self._page('Languages')
+        layout = self._page('Translation')
         self._source, self._target = QComboBox(), QComboBox()
         for code, name in SOURCE_LANGUAGE_LABELS.items():
             self._source.addItem(name, code)
         for code, name in LANGUAGE_LABELS.items():
             self._target.addItem(name, code.value)
-        self._translation = QCheckBox("Translate speech (turn off for transcription-only CPU testing)")
+        self._translation = QCheckBox("Translate speech")
         self._pronunciation = QCheckBox('Show Chinese pinyin and Thai pronunciation on the overlay')
         form = QFormLayout()
         form.addRow('Spoken language', self._source)
         form.addRow('Translate into', self._target)
+        self._translation_mode=QComboBox()
+        for title,code in (('Fast - NLLB on CPU','fast'),('Context-aware - local Qwen on GPU','context'),('Fast + review - automatic AI refinement','review')):
+            self._translation_mode.addItem(title,code)
+        self._translation_mode.setCurrentIndex(max(0,self._translation_mode.findData(self._config.translation_mode)))
+        form.addRow('Translation mode',self._translation_mode)
         layout.addLayout(form)
+        mode_hint=QLabel();mode_hint.setWordWrap(True);mode_hint.setObjectName('hint')
+        descriptions={'fast':'Immediate NLLB translation. Lowest model overhead.',
+            'context':'Qwen translates using up to three earlier original sentences. Uses your GPU; falls back to NLLB if unavailable. Stop live subtitles before manual local analysis.',
+            'review':'NLLB subtitles appear immediately. Qwen reviews completed original sentences in the background. A star in History marks a suggestion; open Details to compare and apply. Transcripts are never changed automatically.'}
+        self._translation_mode.currentIndexChanged.connect(lambda:mode_hint.setText(descriptions[self._translation_mode.currentData()]))
+        mode_hint.setText(descriptions[self._translation_mode.currentData()]);layout.addWidget(mode_hint)
         layout.addWidget(self._translation)
         layout.addWidget(self._pronunciation)
         hint = QLabel('Choose the spoken language when you know it. Auto-detect is useful when the language changes. History keeps pronunciation for later reading.')
@@ -144,7 +162,20 @@ class SettingsDialog(QDialog):
         self._speech_prompt.setPlaceholderText('Optional names, terminology, or desired written form; up to 300 characters')
         layout.addWidget(QLabel('Speech-recognition vocabulary hint'))
         layout.addWidget(self._speech_prompt)
+        translator=QLabel('Speech recognition is separate from translation. Qwen modes reuse your local model; there are no automatic downloads or online fallbacks. Local model setup: Understanding.')
+        translator.setWordWrap(True);translator.setObjectName('hint');layout.addWidget(translator)
+        self._compare_translators=QPushButton('Compare NLLB and local Qwen')
+        self._compare_translators.clicked.connect(self._open_translation_comparison)
+        advanced=QPushButton('Advanced: compare translation engines');advanced.setCheckable(True)
+        self._compare_translators.hide();advanced.toggled.connect(self._compare_translators.setVisible)
+        layout.addWidget(advanced);layout.addWidget(self._compare_translators)
         layout.addStretch()
+
+    def _open_translation_comparison(self):
+        from ui.translation_compare import TranslationComparisonDialog
+        dialog=TranslationComparisonDialog(self._config,self._events,self)
+        dialog.exec()
+        dialog.deleteLater()
 
     def _appearance_page(self):
         from ui.appearance import AppearanceEditor
@@ -159,7 +190,7 @@ class SettingsDialog(QDialog):
 
     def _analysis_page(self):
         from ui.local_ai_settings import LocalAISettings
-        layout=self._page('Analysis')
+        layout=self._page('Understanding')
         self.analysis_settings=LocalAISettings(self._config,self._events,self)
         layout.addWidget(self.analysis_settings)
 
@@ -221,7 +252,7 @@ class SettingsDialog(QDialog):
         self._gpu_model.textChanged.connect(self._backend_visibility)
         layout.addLayout(form)
         layout.addWidget(self._preset_help)
-        hint = QLabel('GPU mode keeps the server loaded and verifies Vulkan allocation at startup. Translation uses CPU. With Vulkan, the selected GGML file determines model size; presets control decoding effort. GPU utilization and VRAM are shown when Windows performance counters are available.')
+        hint = QLabel('GPU mode keeps the server loaded and verifies Vulkan allocation at startup. NLLB translation uses CPU; Qwen translation uses the local GPU model. With Vulkan, the selected GGML file determines model size; presets control decoding effort. GPU utilization and VRAM are shown when Windows performance counters are available.')
         hint.setObjectName('hint')
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -297,6 +328,7 @@ class SettingsDialog(QDialog):
         source = next((s for s in self._sources if s.device_id == c.audio_device_id),None)
         c.audio_device_name = source.name if source else 'Desktop audio (default)'
         c.audio_device_kind = source.kind if source else 'loopback'
+        c.translation_mode = self._translation_mode.currentData()
         c.translation_enabled = self._translation.isChecked()
         c.speech_detection=self._speech_detection.isChecked()
         c.speech_max_seconds=self._speech_max.value()

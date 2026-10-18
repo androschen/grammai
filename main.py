@@ -31,25 +31,30 @@ class GrammAIApp:
         self._config = config
         self._events = EventBus()
         config.apply_quality()
-        self._translator = NllbTranslator(config, self._events)
-        self._engine = WhisperEngine(config, self._translator)
-        self._engine.activity_callback = self._events.activity_changed.emit
         from core.analysis import AnalysisService
+        from ml.live_translator import LiveTranslator
         self._analysis = AnalysisService(events=self._events,config=config)
         self._events.analysis_service = self._analysis
+        self._translator = LiveTranslator(config,NllbTranslator(config,self._events),self._analysis.runtime,self._events)
+        self._engine = WhisperEngine(config,self._translator)
+        self._engine.activity_callback = self._events.activity_changed.emit
         self._pipeline_finished = False
         self._analysis.idle.connect(self._analysis_idle)
         self._pipeline = TranslationPipeline(config, self._events, self._engine)
+        self._events.comparison_allowed=lambda:self._pipeline.model_tasks_idle
         self._player = AudioReplay(self._events,self._pipeline.replays)
         self._phrasebook = Phrasebook()
         self._learning_active = False
         self._playback_active = False
         self._last_update = None
+        self._phrase_dialog = None
         self._monitor = PerformanceMonitor(self._events, self._pipeline)
         self._translation_enabled = False
         self._benchmark_active = False
         self._overlay = SubtitleOverlay(self._events, config)
         self._panel = ControlPanel(config, self._events,replays=self._pipeline.replays)
+        from core.live_review import LiveReview
+        self._live_review=LiveReview(config,self._events,self._analysis,self._panel._history,lambda:self._pipeline.inference_requested)
         self._preference_timer = QTimer()
         self._preference_timer.setSingleShot(True)
         self._preference_timer.setInterval(300)
@@ -60,6 +65,7 @@ class GrammAIApp:
         self._events.subtitle_ready.connect(self._remember_subtitle)
         self._events.subtitle_corrected.connect(self._corrected_subtitle)
         self._events.learning_requested.connect(self._open_study)
+        self._events.phrase_explain_requested.connect(self._open_phrase)
         self._events.review_busy.connect(self._on_review_busy)
         self._events.playback_active.connect(self._on_playback_active)
         self._events.replay_clear_requested.connect(self._player.stop)
@@ -114,6 +120,27 @@ class GrammAIApp:
             self._last_update=update
             # History revisions should not rewrite a subtitle already being read.
 
+    def _open_phrase(self,payload):
+        from ui.phrase_explain import PhraseExplanationDialog
+        from ui.analysis import preceding_context
+        if self._phrase_dialog is not None:
+            self._phrase_dialog.close()
+        self._live_review.defer_for_explanation()
+        data=dict(payload,original_text=payload['update'].native_text,
+            original_language=payload['update'].source_language,
+            context=preceding_context(self._panel._history,payload['update'],2))
+        try:
+            dialog=PhraseExplanationDialog(self._config,self._events,self._analysis,data,self._phrasebook,self._panel)
+        except ValueError as exc:
+            self._panel.set_status(str(exc));return
+        self._events.setProperty('phrase_explanation_open',True)
+        self._phrase_dialog=dialog
+        def finished(result):
+            if self._phrase_dialog is dialog:
+                self._phrase_dialog=None;self._events.setProperty('phrase_explanation_open',False)
+            dialog.deleteLater()
+        dialog.finished.connect(finished);dialog.show()
+
     def _open_study(self,update):
         from ui.learning import StudyDialog
         dialog=StudyDialog(update,self._config,self._events,self._pipeline.replays,self._phrasebook,self._panel,
@@ -158,6 +185,9 @@ class GrammAIApp:
         self._overlay.hide()
 
     def shutdown(self) -> None:
+        self._live_review.close()
+        if self._phrase_dialog is not None:
+            self._phrase_dialog.close()
         self._analysis.shutdown()
         self._player.stop()
         self._preference_timer.stop()

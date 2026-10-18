@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -13,6 +13,8 @@ from audio.replay import ReplayStore
 from core.config import AppConfig,TargetLanguage
 from core.events import EventBus,SubtitleUpdate
 from core.revisions import revised_update
+from core.analysis import AnalysisService
+from ui.theme import style_for
 from ml.phonetics import phonetics_auto
 from ui.learning import StudyDialog
 from ui.panel import ControlPanel
@@ -27,6 +29,7 @@ def main():
     app.setFont(QFont('Segoe UI',10))
     config=AppConfig(source_language='zh',target_language=TargetLanguage.ENGLISH)
     events=EventBus()
+    service=AnalysisService(events=events,config=config)
     with patch('ui.panel.list_audio_sources',return_value=[]):
         panel=ControlPanel(config,events)
     examples=[
@@ -43,17 +46,19 @@ def main():
         update=SubtitleUpdate('',target,source,native_phonetics=phonetics_auto(source),
             source_language=language,target_language='en',created_at=start+timedelta(seconds=index*8))
         if index==len(examples)-1:
-            original=SubtitleUpdate('',"Let's go eat the opposite first.",'我们先去吃反吧。',
+            original=SubtitleUpdate('',"Let's go eat first.",source,
                 source_language='zh',target_language='en',created_at=update.created_at)
-            update=revised_update(original,native_text=source,target_text=target,native_phonetics=phonetics_auto(source))
+            update=revised_update(original,target_text=target,native_phonetics=phonetics_auto(source),ai_refined=True)
         panel._on_subtitle(update)
-    dialog=StudyDialog(update,config,events,ReplayStore(),None,panel)
+    dialog=StudyDialog(update,config,events,ReplayStore(),Mock(),panel,analysis=service)
+    dialog.setStyleSheet(style_for(config.theme))
     screen=Mock();screen.availableGeometry.return_value=QRect(0,0,1920,1080)
     with patch.object(panel,'screen',return_value=screen):
         panel.open_sentence_details(dialog)
-    panel.resize(1480,1020)
-    panel._workspace.setSizes([275,620,485])
+    panel.resize(1320,840)
+    panel._workspace.setSizes([800,430])
     panel.set_status('UI preview with sample sentences — no audio is being captured.')
+    panel.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
     panel.show()
     for _ in range(8):
         QTest.qWait(30)
@@ -61,7 +66,10 @@ def main():
     destination.parent.mkdir(parents=True,exist_ok=True)
     if not panel.grab().save(str(destination)):
         raise RuntimeError('Could not save the README screenshot')
-    panel.mark_quitting();panel.close()
+    dialog.grab().save(str(destination.parent/'grammai-sentence.png'))
+    dialog.bookmark.click();QTest.qWait(50)
+    dialog.save_popup.grab().save(str(destination.parent/'grammai-save.png'))
+    panel.mark_quitting();panel.close();service.shutdown()
     print(destination)
 
 

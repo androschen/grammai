@@ -26,6 +26,10 @@ def main():
         from core.paths import register_existing_models
         register_existing_models()
     env=dict(os.environ)
+    # Desktop-agent media tools add unrelated DLL directories to PATH. Do not
+    # collect their private Windows C runtimes into the application bundle.
+    env['PATH']=os.pathsep.join(part for part in env.get('PATH','').split(os.pathsep)
+        if 'codex-runtimes' not in part.lower())
     # Optional NLP modules may otherwise attempt downloads during hook discovery.
     env['HF_HUB_OFFLINE']='1'
     env['PYTHAINLP_OFFLINE']='1'
@@ -36,7 +40,7 @@ def main():
     (root/'build').mkdir(exist_ok=True)
     stage=Path(tempfile.mkdtemp(prefix='windows-stage-',dir=root/'build'))
     subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--distpath',str(stage),
-        '--workpath',str(root/'build'),'--log-level','WARN',str(root/'packaging/grammai.spec')],cwd=root,env=env,check=True)
+        '--workpath',str(stage/'work'),'--log-level','WARN',str(root/'packaging/grammai.spec')],cwd=root,env=env,check=True)
     if args.installer:
         compiler=root/'.build-tools/inno/ISCC.exe'
         if not compiler.is_file():

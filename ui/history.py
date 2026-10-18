@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame,
     QCheckBox,
+    QLineEdit,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -19,12 +21,65 @@ from PySide6.QtWidgets import (
 
 from core.events import SubtitleUpdate
 from core.revisions import revision_label
+from ui.copyable_text import CopyableLabel
 
 
+def source_language_badge(language):
+    """Show the sentence's source language, never the translation destination."""
+    languages={'zh':('CN','Chinese'),'en':('EN','English'),
+               'th':('TH','Thai'),'id':('ID','Indonesian')}
+    code,name=languages.get(language,('??','Unknown'))
+    badge=QLabel(code)
+    badge.setObjectName('sourceLanguageBadge')
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    badge.setToolTip('Original speech: '+name)
+    badge.setAccessibleName('Original speech language: '+name)
+    badge.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed)
+    return badge
+
+
+class SuggestionPreview(CopyableLabel):
+    """Keep full copyable text while limiting the visible preview to two lines."""
+    def __init__(self,text,parent=None):
+        super().__init__(text,parent)
+        self.setObjectName('aiSuggestionText')
+        self.setWordWrap(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.setToolTip('Local AI suggestion - not applied. Open Details for the full comparison.\n'+text)
+        self.setAccessibleName('Local AI suggestion, not applied')
+        self._update_limit()
+
+    def _update_limit(self):
+        margins=self.contentsMargins()
+        self.setMaximumHeight(self.fontMetrics().lineSpacing()*2+self.margin()*2+margins.top()+margins.bottom())
+
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange,QEvent.Type.StyleChange):
+            self._update_limit()
+
+
+class RevisionMarker(QLabel):
+    """Icon-only provenance marker that follows theme changes."""
+    def __init__(self,update,parent=None):
+        super().__init__(parent)
+        self._icon_name='sparkles' if update.ai_refined else 'edit'
+        self.setObjectName('revisionBadge')
+        self.setAccessibleName('AI refined' if update.ai_refined else revision_label(update))
+        self.setToolTip(self.accessibleName()+'. Not verified correct. Open translation history for original wording.')
+        self._refresh_icon()
+    def _refresh_icon(self):
+        from PySide6.QtGui import QIcon
+        from ui.icons import LineIcon
+        self.setPixmap(QIcon(LineIcon(self._icon_name)).pixmap(14,14))
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if hasattr(self,'_icon_name') and event.type() in (QEvent.Type.StyleChange,QEvent.Type.PaletteChange):self._refresh_icon()
 
 
 class HistoryCard(QFrame):
     study_requested = Signal(object)
+    explain_requested = Signal(object)
     def __init__(self, update: SubtitleUpdate, parent: QWidget | None = None, featured: bool = False) -> None:
         super().__init__(parent)
         self.subtitle=update
@@ -44,11 +99,13 @@ class HistoryCard(QFrame):
         layout.setSpacing(6)
         stamp = QLabel(update.created_at.strftime("%H:%M:%S"))
         stamp.setObjectName("phonetic")
-        copy = QPushButton("Copy")
-        copy.setObjectName("secondary")
-        copy.clicked.connect(lambda: self._copy(update))
         header = QHBoxLayout()
         header.addWidget(stamp)
+        if update.suggested_translation:
+            marker=QLabel('\u2726');marker.setObjectName('revisionBadge')
+            marker.setToolTip('Translation suggestion available. Open Details to compare and apply.')
+            marker.setAccessibleName('Translation suggestion available');header.addWidget(marker)
+        header.addWidget(source_language_badge(update.source_language))
         if revision_label(update):
             badge=QLabel('\u270e')
             badge.setObjectName('revisionBadge')
@@ -59,17 +116,22 @@ class HistoryCard(QFrame):
         study=QPushButton("Details")
         study.clicked.connect(lambda:self.study_requested.emit(self.subtitle))
         header.addWidget(study)
-        header.addWidget(copy)
         layout.addLayout(header)
 
         def add_line(text: str, name: str, font: QFont) -> None:
             if not text:
                 return
-            label = QLabel(text)
+            label = CopyableLabel(text)
             label.setObjectName(name)
+            if name in ('target','native'):
+                original=name=='native' or update.target_text==update.native_text
+                label.explain_handler=lambda phrase,original=original,text=text:self.explain_requested.emit({
+                    'update':self.subtitle,'phrase':phrase,'sentence':text,
+                    'language':update.source_language if original else update.target_language,
+                    'text_role':'original' if original else 'translation'})
             label.setWordWrap(True)
             label.setTextFormat(Qt.TextFormat.PlainText)
-            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
             label.setFont(font)
             layout.addWidget(label)
 
@@ -83,46 +145,31 @@ class HistoryCard(QFrame):
             add_line(native, "native", QFont("Segoe UI", 11))
 
     def _build_compact(self, update):
-        layout=QVBoxLayout(self)
-        layout.setContentsMargins(10,6,10,6)
-        layout.setSpacing(3)
-        row=QHBoxLayout()
-        row.setSpacing(8)
-        stamp=QLabel(update.created_at.strftime('%H:%M'))
-        stamp.setObjectName('hint')
-        stamp.setFixedWidth(36)
-        row.addWidget(stamp,0,Qt.AlignmentFlag.AlignTop)
-        revision=revision_label(update)
-        if revision:
-            badge=QLabel('\u270e')
-            badge.setObjectName('revisionBadge')
-            badge.setToolTip(revision+'. Revised does not mean verified correct.')
-            badge.setAccessibleName(revision)
-            row.addWidget(badge,0,Qt.AlignmentFlag.AlignTop)
-        text=update.target_text or update.native_text
-        if update.translation_status == 'unavailable':
-            text='Original: '+update.native_text
-        target=QLabel(text)
-        target.setObjectName('target')
-        target.setWordWrap(True)
-        target.setTextFormat(Qt.TextFormat.PlainText)
-        target.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        row.addWidget(target,1)
-        self.details_button=QPushButton('Details')
-        self.details_button.setToolTip('Original audio, pronunciation, revisions and manual recheck')
-        self.details_button.clicked.connect(lambda:self.study_requested.emit(self.subtitle))
-        row.addWidget(self.details_button,0,Qt.AlignmentFlag.AlignTop)
-        layout.addLayout(row)
-
-    def _copy(self, update):
-        from PySide6.QtWidgets import QApplication
-        lines = [update.phonetics, update.target_text, update.native_phonetics, update.native_text]
-        QApplication.clipboard().setText("\n".join(dict.fromkeys(x for x in lines if x)))
+        from ui.icons import icon_button
+        layout=QHBoxLayout(self);layout.setContentsMargins(14,9,12,9);layout.setSpacing(10)
+        badge=source_language_badge(update.source_language);badge.setFixedWidth(28);badge.setToolTip(badge.toolTip()+' · '+update.created_at.strftime('%H:%M:%S'));layout.addWidget(badge,0,Qt.AlignmentFlag.AlignTop)
+        column=QVBoxLayout();column.setContentsMargins(0,0,0,0);column.setSpacing(3)
+        def label(text,name,original=False,destination=None):
+            value=CopyableLabel(text,self);value.setObjectName(name);value.setWordWrap(True);value.setTextFormat(Qt.TextFormat.PlainText)
+            value.explain_handler=lambda phrase:self.explain_requested.emit({'update':self.subtitle,'phrase':phrase,'sentence':text,'language':update.source_language if original else update.target_language,'text_role':'original' if original else 'translation'})
+            (destination if destination is not None else column).addWidget(value);return value
+        label(update.native_text,'originalSpeech',True)
+        if update.native_phonetics:label(update.native_phonetics,'phonetic',True)
+        translated=bool(update.target_text and update.target_text!=update.native_text)
+        if translated:
+            translation_row=QHBoxLayout();translation_row.setContentsMargins(0,0,0,0);translation_row.setSpacing(6)
+            value=label(update.target_text,'target',destination=translation_row);translation_row.setStretch(0,1)
+            if revision_label(update):translation_row.addWidget(RevisionMarker(update,self),0,Qt.AlignmentFlag.AlignTop)
+            column.addLayout(translation_row)
+        elif update.translation_status=='unavailable':label('Translation unavailable','hint')
+        layout.addLayout(column,1)
+        self.details_button=icon_button('chevron','Understand this sentence',self);self.details_button.clicked.connect(lambda:self.study_requested.emit(self.subtitle));layout.addWidget(self.details_button,0,Qt.AlignmentFlag.AlignTop)
 
 
 class HistoryPanel(QWidget):
     cleared = Signal()
     study_requested = Signal(object)
+    explain_requested = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -132,19 +179,22 @@ class HistoryPanel(QWidget):
         self._count = QLabel("0 lines")
         self._count.setObjectName("hint")
 
-        clear = QPushButton("Clear")
+        from ui.icons import icon_button
+        clear = icon_button("trash","Clear temporary session history",self)
         clear.setObjectName("secondary")
         clear.setCursor(Qt.CursorShape.PointingHandCursor)
         clear.clicked.connect(self._on_clear_clicked)
 
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
+        header.setText("Session history")
         top.addWidget(header)
         top.addStretch(1)
         self._follow = QCheckBox("Auto-scroll")
         self._follow.setChecked(True)
         top.addWidget(self._follow)
         top.addWidget(self._count)
+        self._filter_toggle=icon_button("search","Search and filter history",self);self._filter_toggle.setCheckable(True);top.addWidget(self._filter_toggle)
         top.addWidget(clear)
 
         self._empty = QLabel("No lines yet. Start translation and play audio — history stays here until you quit.")
@@ -171,39 +221,62 @@ class HistoryPanel(QWidget):
         scroll.setMinimumHeight(220)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll = scroll
+        self._deferred_updates={}
+        self._selection_timer=QTimer(self);self._selection_timer.setInterval(150);self._selection_timer.timeout.connect(self._flush_deferred)
         self._follow_timer = QTimer(self)
         self._follow_timer.setSingleShot(True)
         self._follow_timer.timeout.connect(self._scroll_bottom)
         scroll.verticalScrollBar().rangeChanged.connect(self._schedule_follow)
+        scroll.verticalScrollBar().actionTriggered.connect(lambda action:self._follow.setChecked(False))
         self._follow.toggled.connect(self._schedule_follow)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addLayout(top)
+        filters=QHBoxLayout()
+        self.search=QLineEdit();self.search.setPlaceholderText('Search transcript, translation or pronunciation')
+        self.search.setClearButtonEnabled(True);self.search.setAccessibleName('Search session history')
+        self.language_filter=QComboBox();self.language_filter.setAccessibleName('Filter original speech language')
+        for label,code in (('All languages',''),('Chinese','zh'),('English','en'),('Thai','th'),('Indonesian','id')):
+            self.language_filter.addItem(label,code)
+        filters.addWidget(self.search,1);filters.addWidget(self.language_filter)
+        self._filters=QWidget();self._filters.setLayout(filters);self._filters.hide();layout.addWidget(self._filters)
+        self._filter_toggle.toggled.connect(self._filters.setVisible)
+        self.search.textChanged.connect(self._apply_filter)
+        self.language_filter.currentIndexChanged.connect(self._apply_filter)
         layout.addWidget(scroll, 1)
 
     def append(self, update: SubtitleUpdate) -> None:
         self._empty.hide()
         card = HistoryCard(update)
         card.study_requested.connect(self.study_requested.emit)
+        card.explain_requested.connect(self.explain_requested.emit)
         self._list.addWidget(card)
         while self._card_count() > 80:
             self._remove_oldest_card()
-        self._refresh_count()
+        self._apply_filter()
         self._schedule_follow()
+
+    def _flush_deferred(self):
+        for update in list(self._deferred_updates.values()):self.replace_update(update)
+        if not self._deferred_updates:self._selection_timer.stop()
 
     def replace_update(self,update):
         for index in range(self._list.count()):
             old=self._list.itemAt(index).widget()
             if isinstance(old,HistoryCard) and old.subtitle.uid==update.uid:
+                if any(label.hasSelectedText() for label in old.findChildren(CopyableLabel)):
+                    self._deferred_updates[update.uid]=update;self._selection_timer.start();return True
+                self._deferred_updates.pop(update.uid,None)
                 self._list.takeAt(index)
                 old.hide()
                 old.deleteLater()
                 card=HistoryCard(update)
                 card.study_requested.connect(self.study_requested.emit)
+                card.explain_requested.connect(self.explain_requested.emit)
                 self._list.insertWidget(index,card)
-                self._schedule_follow()
+                self._apply_filter()
                 return True
         return False
 
@@ -221,7 +294,7 @@ class HistoryPanel(QWidget):
         self._list.activate()
         for index in reversed(range(self._list.count())):
             card = self._list.itemAt(index).widget()
-            if isinstance(card, HistoryCard):
+            if isinstance(card, HistoryCard) and not card.isHidden():
                 # ensureWidgetVisible may use a card's hidden details/focus child.
                 # Its layout geometry is the visible sentence's actual extent.
                 bar = self._scroll.verticalScrollBar()
@@ -235,6 +308,7 @@ class HistoryPanel(QWidget):
 
     def clear(self) -> None:
         self._follow_timer.stop()
+        self._selection_timer.stop();self._deferred_updates.clear()
         index = 0
         while index < self._list.count():
             widget = self._list.itemAt(index).widget()
@@ -246,7 +320,7 @@ class HistoryPanel(QWidget):
                 index += 1
         self._empty.show()
         self._scroll.verticalScrollBar().setValue(0)
-        self._refresh_count()
+        self._apply_filter()
 
     def _card_count(self) -> int:
         return sum(
@@ -259,10 +333,28 @@ class HistoryPanel(QWidget):
         for i in range(self._list.count()):
             widget = self._list.itemAt(i).widget()
             if isinstance(widget, HistoryCard):
+                self._deferred_updates.pop(widget.subtitle.uid,None)
                 self._list.takeAt(i)
                 widget.hide()
                 widget.deleteLater()
                 return
+
+    def _apply_filter(self,*args):
+        query=self.search.text().strip().casefold()
+        language=self.language_filter.currentData()
+        total=visible=0
+        for index in range(self._list.count()):
+            card=self._list.itemAt(index).widget()
+            if not isinstance(card,HistoryCard):
+                continue
+            total+=1;u=card.subtitle
+            text=' '.join((u.native_text,u.target_text,u.phonetics,u.native_phonetics,u.suggested_translation)).casefold()
+            match=(not language or u.source_language==language) and (not query or query in text)
+            card.setVisible(match);visible+=int(match)
+        self._empty.setText('No matching sentences.' if total else 'No lines yet. Start translation and play audio - history stays here until you quit.')
+        self._empty.setVisible(not visible)
+        self._count.setText(f'{visible} / {total} lines' if query or language else ('1 line' if total==1 else f'{total} lines'))
+        self._schedule_follow()
 
     def _refresh_count(self) -> None:
         n = self._card_count()
