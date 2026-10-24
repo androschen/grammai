@@ -87,6 +87,11 @@ class SubtitleOverlay(QWidget):
         self._hud_effect=QGraphicsOpacityEffect(self._hud)
         self._hud.setGraphicsEffect(self._hud_effect)
         self._stack = SubtitleStack(self)
+        self._page=0
+        self._pages=[]
+        self._page_timer=QTimer(self)
+        self._page_timer.setSingleShot(True)
+        self._page_timer.timeout.connect(self._next_page)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -108,16 +113,53 @@ class SubtitleOverlay(QWidget):
         config=self.appearance
         max_width=max(120,int(max_width)-16)
         labels=(self._stack.target,self._stack.phonetics,self._stack.native,self._stack.native_phonetics)
-        text_width=max((max((label.fontMetrics().horizontalAdvance(line) for line in label.text().splitlines()),default=0)
-            +label.margin()*2 for label in labels if not label.isHidden()),default=180)
-        width=min(max_width,max(180,text_width+2*config.overlay_padding+8))
+        width=max_width
         self._stack.setFixedWidth(width)
+        inner=max(1,width-2*(config.overlay_padding+4))
+        enabled=(True,config.show_pronunciation,config.overlay_show_original,False)
+        self._pages=[]
+        for label,visible in zip(labels,enabled):
+            label.setVisible(visible)
+            lines=2 if label is self._stack.target else 1
+            label.setFixedHeight(label.fontMetrics().lineSpacing()*lines+label.margin()*2+4)
+            # Shape the full text, then slice UTF-16 offsets returned by Qt.
+            saved=label.display_text;label.display_text=None
+            shaped,_=label._layout(max(1,inner-label.margin()*2),QColor('white'))
+            label.display_text=saved
+            raw=label.text().encode('utf-16-le')
+            pages=[]
+            for offset in range(0,shaped.lineCount(),lines):
+                first=shaped.lineAt(offset)
+                last=shaped.lineAt(min(offset+lines-1,shaped.lineCount()-1))
+                pages.append(raw[first.textStart()*2:(last.textStart()+last.textLength())*2].decode('utf-16-le'))
+            self._pages.append((label,pages if visible else []))
+        self._render_page()
+        margins=self._stack.layout().contentsMargins()
+        count=sum(enabled)
+        stack_height=sum(label.height() for label,visible in zip(labels,enabled) if visible)+margins.top()+margins.bottom()+max(0,count-1)*self._stack.layout().spacing()
+        self._stack.setFixedHeight(stack_height)
         if not self._hud.isHidden():
             hud_width=min(max_width,max(width,self._hud.minimumSizeHint().width()))
             self._hud.setFixedWidth(hud_width)
             width=max(width,hud_width)
-        height=max(1,self.layout().heightForWidth(width+16))
+        self._stack.layout().activate()
+        self.layout().invalidate()
+        self.layout().activate()
+        height=stack_height+16+(self._hud.sizeHint().height()+6 if not self._hud.isHidden() else 0)
         return width+16,min(max_height,height)
+
+    def _render_page(self):
+        for label,pages in self._pages:
+            label.display_text=pages[self._page] if self._page<len(pages) else ''
+            label.update()
+        self._page_timer.stop()
+        if any(self._page+1<len(pages) for _,pages in self._pages):
+            chars=max((len(label.display_text or '') for label,_ in self._pages),default=0)
+            self._page_timer.start(max(2200,min(6000,chars*65)))
+
+    def _next_page(self):
+        self._page+=1
+        self._render_page()
 
     def _place_at_bottom(self) -> None:
         if self._preview:
@@ -146,7 +188,9 @@ class SubtitleOverlay(QWidget):
 
     @Slot(object)
     def apply_subtitle(self, update: SubtitleUpdate) -> None:
+        self._page=0
         self._stack.apply(update)
+        self._stack.phonetics.setText(update.phonetics or update.native_phonetics or "")
         self._apply_appearance()
         QTimer.singleShot(0, self, self._place_at_bottom)
 
@@ -185,6 +229,16 @@ class SubtitleOverlay(QWidget):
         self._preview_config=config
         self._apply_appearance()
 
+    def hideEvent(self,event):
+        self._page_timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self,event):
+        super().showEvent(event)
+        self._render_page()
+
     def reset_text(self) -> None:
+        self._page_timer.stop()
+        self._page=0
         self._stack.reset()
         self._apply_appearance()

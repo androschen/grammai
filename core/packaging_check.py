@@ -38,8 +38,45 @@ def smoke_check(report,verify_models=False):
         settings.reject();settings.deleteLater();results['translation_settings']='ok'
         from ui.deck import LearningDeckDialog
         from core.phrasebook import Phrasebook
+        from core.preferences import data_dir
+        deck_path=data_dir()/'phrases.json'
+        results['deck_storage']={'path':str(deck_path),'exists':deck_path.is_file()}
+        try:
+            raw=json.loads(deck_path.read_text(encoding='utf-8-sig')) if deck_path.is_file() else []
+            results['deck_storage']['raw_count']=len(raw) if isinstance(raw,list) else -1
+            results['deck_storage']['reader_count']=len(Phrasebook().items())
+        except Exception as exc:
+            results['deck_storage']['error']=type(exc).__name__
         deck=LearningDeckDialog(AppConfig(),Phrasebook())
+        if 'error' not in results['deck_storage']:
+            results['deck_storage']['displayed_count']=deck.list.count()
+            assert deck.list.count()==results['deck_storage']['reader_count']==results['deck_storage']['raw_count']
+        assert deck.mode.count()==2
+        assert deck.editor.edit_fields.isHidden() and deck.editor.checked.isHidden()
+        assert deck.editor.save.text()=='Save notes'
+        results['reading_card_ui']='ok'
+        from PySide6.QtCore import Qt
+        assert deck.editor.windowModality()==Qt.WindowModality.WindowModal
+        from core.learning_cards import practice_prompt
+        assert practice_prompt({'card_type':'vocabulary','native_text':'gua','example_sentence':'gua beli nasi dulu'},'recall')[0]=='____ beli nasi dulu'
+        from ui.card_explanation import CardExplanationWidget
+        explanation=CardExplanationWidget()
+        explanation.set_data({'sentence_meaning':'Saya makan dulu.','why':'Urutan tindakan.',
+            'words':[{'text':'gua','pronunciation':'','meaning':'saya','reason':'Kata ganti.'}]},None)
+        assert explanation.reading_layout.count()==3
+        explanation.dispose();explanation.deleteLater()
+        assert deck.practice_explanation.value is None
+        results['saved_explanation_ui']='ok'
+        results['contextual_vocabulary_ui']='ok'
         deck.reject();deck.deleteLater();results['learning_deck_ui']='ok'
+        from ui.deck import LearningDeckPage
+        from PySide6.QtWidgets import QWidget,QVBoxLayout
+        host=QWidget();host.resize(940,700);host_box=QVBoxLayout(host)
+        page=LearningDeckPage(AppConfig(),Phrasebook(),host);host_box.addWidget(page)
+        assert not page.isWindow() and not page.editor.isWindow()
+        assert page.editor.window() is host
+        assert page.list.count()==results['deck_storage'].get('reader_count',page.list.count())
+        results['single_window_deck']='ok';page.dispose();host.deleteLater()
         from ui.phrase_explain import PhraseExplanationDialog
         from core.analysis import AnalysisService
         phrase_service=AnalysisService(events=events,config=AppConfig())

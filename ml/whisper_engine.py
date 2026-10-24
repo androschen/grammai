@@ -85,6 +85,15 @@ class WhisperEngine:
         self._previous_language=None
         self._overlap_seconds=0.
 
+    def reset_context(self):
+        """Forget continuity after missing audio or playback, without reloading models."""
+        self._previous_native = ''
+        self._previous_language = None
+        self._overlap_seconds = 0.
+        reset = getattr(self._translator, 'reset_context', None)
+        if reset:
+            reset()
+
     def reset_failures(self) -> None:
         if self._translator is not None:
             self._translator.reset_failure()

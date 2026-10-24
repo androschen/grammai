@@ -20,7 +20,7 @@ class LocalAISettings(QWidget):
         self.enabled=QCheckBox('Enable on-demand sentence explanations')
         self.enabled.setChecked(config.analysis_enabled)
         layout.addWidget(self.enabled)
-        note=QLabel('Translation mode lives under Translation. Here you can explain meaning and slang when you open a sentence. Automatic review uses local Qwen regardless of the optional explanation provider.')
+        note=QLabel('Speech, translation and model files live under Models. Here you can explain meaning and slang when you open a sentence. Automatic review uses local Qwen regardless of the optional explanation provider.')
         note.setWordWrap(True);note.setObjectName('hint');layout.addWidget(note)
         self.explanation=self._combo([(label,code.value) for code,label in LANGUAGE_LABELS.items()],config.analysis_explanation_language)
         quick=QFormLayout();quick.addRow('Explain in',self.explanation);layout.addLayout(quick)
@@ -83,7 +83,7 @@ class LocalAISettings(QWidget):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         executable,model=self.service.runtime.paths(config) if self.service else managed_paths()
         if not (self.service and self.service.runtime.loaded):
-            self.status.setText('Ready - local model installed; loads when needed.' if executable.is_file() and model.is_file() else 'Local model needs setup. Open Advanced to install or choose model files.')
+            self.status.setText('Ready - local model installed; loads when needed.' if executable.is_file() and model.is_file() else 'Local model needs setup. Install here under Advanced, or choose existing files under Models / Advanced.')
         layout.insertWidget(3,self.status)
         row.removeWidget(self.load);layout.insertWidget(4,self.load)
         form.addWidget(advanced)

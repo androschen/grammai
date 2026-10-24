@@ -64,6 +64,9 @@ class SettingsDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.apply)
         layout.addWidget(buttons)
         self._load_values()
+        events.metrics_changed.connect(self._model_metrics)
+        history=events.property("resource_history") or ()
+        if history:self._model_metrics(history[-1][1])
         events.audio_level_changed.connect(self._on_audio_level)
         events.benchmark_finished.connect(self.results.show_result)
         events.benchmark_progress.connect(self._benchmark_progress)
@@ -143,12 +146,12 @@ class SettingsDialog(QDialog):
         for title,code in (('Fast - NLLB on CPU','fast'),('Context-aware - local Qwen on GPU','context'),('Fast + review - automatic AI refinement','review')):
             self._translation_mode.addItem(title,code)
         self._translation_mode.setCurrentIndex(max(0,self._translation_mode.findData(self._config.translation_mode)))
-        form.addRow('Translation mode',self._translation_mode)
+        # The model choice is placed on Models after the language page is built.
         layout.addLayout(form)
-        mode_hint=QLabel();mode_hint.setWordWrap(True);mode_hint.setObjectName('hint')
+        mode_hint=QLabel();self._mode_hint=mode_hint;mode_hint.setWordWrap(True);mode_hint.setObjectName('hint')
         descriptions={'fast':'Immediate NLLB translation. Lowest model overhead.',
             'context':'Qwen translates using up to three earlier original sentences. Uses your GPU; falls back to NLLB if unavailable. Stop live subtitles before manual local analysis.',
-            'review':'NLLB subtitles appear immediately. Qwen reviews completed original sentences in the background. A star in History marks a suggestion; open Details to compare and apply. Transcripts are never changed automatically.'}
+            'review':'NLLB subtitles appear immediately. Qwen reviews completed original sentences in the background. Refinements update automatically; open sentence details to compare versions. Transcripts are never changed automatically.'}
         self._translation_mode.currentIndexChanged.connect(lambda:mode_hint.setText(descriptions[self._translation_mode.currentData()]))
         mode_hint.setText(descriptions[self._translation_mode.currentData()]);layout.addWidget(mode_hint)
         layout.addWidget(self._translation)
@@ -162,7 +165,7 @@ class SettingsDialog(QDialog):
         self._speech_prompt.setPlaceholderText('Optional names, terminology, or desired written form; up to 300 characters')
         layout.addWidget(QLabel('Speech-recognition vocabulary hint'))
         layout.addWidget(self._speech_prompt)
-        translator=QLabel('Speech recognition is separate from translation. Qwen modes reuse your local model; there are no automatic downloads or online fallbacks. Local model setup: Understanding.')
+        translator=QLabel('Speech recognition is separate from translation. Qwen modes reuse your local model; there are no automatic downloads or online fallbacks. Model choices and runtime status: Models.')
         translator.setWordWrap(True);translator.setObjectName('hint');layout.addWidget(translator)
         self._compare_translators=QPushButton('Compare NLLB and local Qwen')
         self._compare_translators.clicked.connect(self._open_translation_comparison)
@@ -193,6 +196,15 @@ class SettingsDialog(QDialog):
         layout=self._page('Understanding')
         self.analysis_settings=LocalAISettings(self._config,self._events,self)
         layout.addWidget(self.analysis_settings)
+        # One set of file controls, shared by refinement and explanations.
+        self._model_advanced_layout.addWidget(QLabel('Local Qwen runtime and model'))
+        self._model_advanced_layout.addWidget(self.analysis_settings.files)
+        self.analysis_settings.files.show()
+        for button in self.analysis_settings.findChildren(QPushButton):
+            if button.text() == 'Choose existing runtime / model files':
+                button.hide()
+        self.analysis_settings.exe.textChanged.connect(self._describe_preset)
+        self.analysis_settings.gguf.textChanged.connect(self._describe_preset)
 
     def _file_row(self, edit, executable=False):
         row = QHBoxLayout()
@@ -214,12 +226,12 @@ class SettingsDialog(QDialog):
         self._analysis_status(f'{message}: {percent}%')
 
     def _performance_page(self):
-        outer = self._page('Performance')
+        outer = self._page('Models')
         subpages = QTabWidget()
         outer.addWidget(subpages)
         configuration = QWidget()
         layout = QVBoxLayout(configuration)
-        subpages.addTab(configuration, 'Configuration')
+        subpages.addTab(configuration, 'Models')
         self._quality = QComboBox()
         for mode,label in QUALITY_LABELS.items():
             self._quality.addItem(label,mode.value)
@@ -239,23 +251,40 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow('Quality preset',self._quality)
         form.addRow('Speech recognition backend',self._backend)
-        form.addRow('Speech CPU threads',self._threads)
-        form.addRow('Translation CPU threads',self._mt_threads)
+        form.addRow('Translation',self._translation_mode)
+        self._selected_models=QLabel();self._selected_models.setWordWrap(True)
+        self._selected_models.setTextFormat(Qt.TextFormat.PlainText)
+        self._runtime_models=QLabel('Running: waiting for live status')
+        self._runtime_models.setWordWrap(True)
+        self._runtime_models.setTextFormat(Qt.TextFormat.PlainText)
+        advanced_form=QFormLayout()
+        advanced_form.addRow('Speech CPU threads',self._threads)
+        advanced_form.addRow('Translation CPU threads',self._mt_threads)
         self._gpu_setup = QWidget()
         gpu_form = QFormLayout(self._gpu_setup)
         gpu_form.setContentsMargins(0,0,0,0)
         gpu_form.addRow('Vulkan server',self._file_row(self._exe,True))
         gpu_form.addRow('Vulkan speech model',self._file_row(self._gpu_model))
-        form.addRow(self._gpu_setup)
+        advanced_form.addRow(self._gpu_setup)
         self._backend.currentIndexChanged.connect(self._backend_visibility)
         self._exe.textChanged.connect(self._backend_visibility)
         self._gpu_model.textChanged.connect(self._backend_visibility)
         layout.addLayout(form)
+        layout.addWidget(self._selected_models)
+        layout.addWidget(self._runtime_models)
         layout.addWidget(self._preset_help)
+        layout.addWidget(self._mode_hint)
+        self._model_advanced=QWidget()
+        self._model_advanced_layout=QVBoxLayout(self._model_advanced)
+        self._model_advanced_layout.addLayout(advanced_form)
+        advanced_toggle=QPushButton('Advanced');advanced_toggle.setCheckable(True)
+        advanced_toggle.toggled.connect(self._model_advanced.setVisible)
+        layout.addWidget(advanced_toggle);layout.addWidget(self._model_advanced)
+        self._model_advanced.hide()
         hint = QLabel('GPU mode keeps the server loaded and verifies Vulkan allocation at startup. NLLB translation uses CPU; Qwen translation uses the local GPU model. With Vulkan, the selected GGML file determines model size; presets control decoding effort. GPU utilization and VRAM are shown when Windows performance counters are available.')
         hint.setObjectName('hint')
         hint.setWordWrap(True)
-        layout.addWidget(hint)
+        self._model_advanced_layout.addWidget(hint)
         installed=QPushButton('Use installed GPU speech model')
         def select_installed():
             from core.speech_assets import installed_paths
@@ -267,7 +296,8 @@ class SettingsDialog(QDialog):
             else:
                 self._feedback.setText('GPU speech assets are not installed. See the local speech setup instructions in README.')
         installed.clicked.connect(select_installed)
-        layout.addWidget(installed)
+        layout.insertWidget(1,installed)
+        self._translation_mode.currentIndexChanged.connect(self._describe_preset)
         layout.addStretch()
         monitor = QWidget()
         monitor_layout = QVBoxLayout(monitor)
@@ -314,9 +344,38 @@ class SettingsDialog(QDialog):
     def _backend_visibility(self):
         self._gpu_setup.setVisible(self._backend.currentData() == "vulkan")
         ready = Path(self._exe.text()).is_file() and Path(self._gpu_model.text()).is_file()
-        self._backend.setItemText(1, "Radeon / Vulkan - verify on Start" if ready else "Radeon / Vulkan - setup required")
+        self._backend.setItemText(1, "Radeon / Vulkan" if ready else "Radeon / Vulkan · setup required")
+        self._describe_preset()
+
+    def _model_metrics(self, data):
+        if data.get('kind') != 'live':
+            return
+        engine=data.get('backend','Stopped')
+        model=data.get('model','')
+        self._runtime_models.setText('Running speech: '+engine+(' · '+model if model else '')+
+            '\nLocal AI: '+str(data.get('analysis_status','Unloaded')))
 
     def _describe_preset(self):
+        if not hasattr(self,'_selected_models'):
+            return
+        gpu=self._backend.currentData()=='vulkan'
+        model=Path(self._gpu_model.text()).name if gpu else ('small' if self._quality.currentData()=='accurate' else 'base')
+        ready=not gpu or (Path(self._exe.text()).is_file() and Path(self._gpu_model.text()).is_file())
+        mode=self._translation_mode.currentData()
+        from core.local_assets import managed_paths
+        exe,gguf=managed_paths()
+        if hasattr(self,'analysis_settings'):
+            exe=Path(self.analysis_settings.exe.text().strip() or str(exe))
+            gguf=Path(self.analysis_settings.gguf.text().strip() or str(gguf))
+        ai_ready=exe.is_file() and gguf.is_file()
+        self._selected_models.setText('Selected speech: '+(model or 'Choose a model')+
+            (' · Radeon GPU' if gpu else ' · CPU')+('' if ready else ' · Files missing')+
+            '\nTranslation: '+('Local Qwen · GPU (NLLB fallback)' if mode=='context' else 'NLLB · CPU')+
+            '\nRefinement: '+('Off' if mode!='review' else gguf.name+' · GPU')+
+            ('\nLocal AI files missing — choose them in Advanced.' if mode in ('context','review') and not ai_ready else ''))
+        if gpu:
+            self._preset_help.setText('The selected GPU file determines the speech model. Quality changes decoding effort, not model size. Changes take effect after Apply.')
+            return
         descriptions = {'fast': 'Low resource: base speech model, minimal decoding effort. Lower CPU demand; may reduce accuracy.',
             'balanced': 'Balanced: base speech model with moderate decoding effort. A useful starting point for watching videos.',
             'accurate': 'Best quality: small speech model and deeper decoding. Uses more processing time.'}
@@ -406,7 +465,8 @@ class SettingsDialog(QDialog):
             self.analysis_settings.service.progress_changed.disconnect(self._analysis_progress)
         self.analysis_settings.dispose()
         self.storage.set_active(False)
-        for signal,slot in ((self._events.audio_level_changed,self._on_audio_level),
+        for signal,slot in ((self._events.metrics_changed,self._model_metrics),
+            (self._events.audio_level_changed,self._on_audio_level),
             (self._events.benchmark_progress,self._benchmark_progress),
             (self._events.benchmark_busy,self._benchmark_busy),
             (self._events.benchmark_finished,self.results.show_result)):

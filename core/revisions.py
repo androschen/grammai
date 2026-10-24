@@ -13,7 +13,9 @@ def revised_update(original, **changes):
         original_native_text=(original.native_text if original.original_native_text is None else original.original_native_text),
         original_target_text=(original.target_text if original.original_target_text is None else original.original_target_text),
         revision_count=original.revision_count + 1,
-        ai_refined=changes.get('ai_refined',False))
+        ai_refined=changes.get('ai_refined',False),
+        review_status=changes.get('review_status','not_requested'),
+        review_reason=changes.get('review_reason','Wording changed; automatic review has not run on this version.'))
 
 
 def revision_label(update):

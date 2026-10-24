@@ -20,7 +20,7 @@ from audio.replay import ReplayStore
 
 APP=QApplication.instance() or QApplication([])
 PAYLOAD={'phrase':'gua','sentence':'gua beli nasi dulu','language':'id','original_text':'gua beli nasi dulu','original_language':'id','text_role':'original'}
-VALUE={'meaning':'saya (informal)','usage':'Informal','example':'Gua pulang. - I am going home.','uncertainty':'Depends on context.'}
+VALUE={'meaning':'saya (informal)','usage':'Informal','usage_note':'An informal way to refer to yourself.','uncertainty':'Depends on context.'}
 
 
 class PhraseExplanationTests(unittest.TestCase):
@@ -30,13 +30,13 @@ class PhraseExplanationTests(unittest.TestCase):
         self.assertTrue(all(len(x['text'])<=160 for x in value['context']))
         with self.assertRaises(ValueError):explanation_input(dict(PAYLOAD,phrase='x'*121))
         with self.assertRaises(ValueError):explanation_input(dict(PAYLOAD,phrase='not present'))
-        runtime=Mock();runtime.complete_json.return_value=dict(VALUE,usage='casual')
+        runtime=Mock();runtime.complete_json.return_value=dict(VALUE,usage='casual',sentence_meaning='Saya mau beli nasi dulu.',why='Gua adalah kata ganti informal.',words=[dict(text=PAYLOAD['sentence'],pronunciation='',meaning='Saya mau beli nasi dulu.',reason='Rencana tindakan selanjutnya.')])
         result=explain(AppConfig(),dict(PAYLOAD,text_role='translation'),runtime)
         body=runtime.complete_json.call_args.args[0]
-        self.assertEqual(body['max_tokens'],384)
-        self.assertFalse(body['chat_template_kwargs']['enable_thinking'])
+        self.assertEqual(body['max_tokens'],2560)
+        self.assertTrue(body['chat_template_kwargs']['enable_thinking'])
         self.assertIn('not evidence',body['messages'][0]['content'])
-        self.assertEqual(result,VALUE)
+        self.assertEqual({k:result[k] for k in VALUE},VALUE)
 
     def test_same_request_uses_session_cache_and_forces_local_provider(self):
         events=EventBus();service=AnalysisService(events=events,config=AppConfig())
@@ -60,7 +60,7 @@ class PhraseExplanationTests(unittest.TestCase):
         label=CopyableLabel('gua beli nasi');selected=[];label.explain_handler=selected.append
         label.setSelection(0,3);menu=label.create_copy_menu()
         self.assertEqual(menu.actions()[0].text(),'Copy')
-        next(a for a in menu.actions() if a.text()=='Explain selected phrase locally').trigger()
+        next(a for a in menu.actions() if a.text()=='Create learning card (local AI)').trigger()
         self.assertEqual(selected,['gua'])
         menu.deleteLater();label.deleteLater()
 

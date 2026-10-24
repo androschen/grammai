@@ -126,6 +126,27 @@ QFrame#sentenceReadingSection, QFrame#sentenceTranslationSection { background: #
 QFrame#sentenceHistorySection { background: transparent; border: none; border-top: 1px solid #33403b; }
 """
 
+APP_STYLE += """
+QLabel#reviewStatus { color: #a5c5b2; font-size: 12px; padding: 2px 0; }
+"""
+
+APP_STYLE += """
+QLabel#contextPreview { color: #a5c5b2; border-left: 2px solid #33403b; padding: 4px 8px; }
+"""
+
+APP_STYLE += """
+QListWidget#learningCards { background: transparent; border: none; padding: 0; }
+QListWidget#learningCards::item { padding: 0; border: none; border-bottom: 1px solid #293233; }
+QListWidget#learningCards::item:selected { background: #2a4236; border-radius: 7px; }
+"""
+
+APP_STYLE += """
+QFrame#learningFlatSection { background: transparent; border: none; border-bottom: 1px solid #293233; border-radius: 0; }
+QLabel#learningExpression { font-size: 22px; font-weight: 600; }
+QLabel#learningExample { font-size: 18px; font-weight: 500; }
+QLabel#learningTerm { font-weight: 600; }
+"""
+
 _LIGHT = {
     '#e7eded':'#24372e', '#111617':'#f3f6f3', '#f5f8f7':'#152c21',
     '#839694':'#5a7164', '#94a6a3':'#5a7064', '#a8bab6':'#526c5d',

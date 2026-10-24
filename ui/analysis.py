@@ -32,31 +32,29 @@ class SentenceAnalysis(QWidget):
         layout=QVBoxLayout(self);layout.setContentsMargins(8,12,8,12);layout.setSpacing(9);layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.source_label=QLabel()
         layout.addWidget(self.source_label)
+        selected_heading=QLabel('Selected sentence');selected_heading.setObjectName('field');layout.addWidget(selected_heading)
         self.source_text=QPlainTextEdit(study.text.toPlainText())
         self.source_text.setAccessibleName('Original transcript used for context analysis')
         self.source_text.setMaximumHeight(64)
         self.source_text.setReadOnly(True)
         self.source_text.hide()
-        layout.addWidget(self.source_text)
-        context_toggle=QPushButton('Earlier dialogue')
-        context_toggle.setCheckable(True)
-        layout.addWidget(context_toggle)
-        self.context=QPlainTextEdit()
-        self.context.setReadOnly(True)
-        self.context.setMaximumHeight(72)
-        self.context.setPlainText('\n'.join(item['text'] for item in self._original_context) or 'No preceding sentences in this session.')
-        layout.addWidget(self.context)
+        self.selected_preview=CopyableLabel(study.text.toPlainText());self.selected_preview.setWordWrap(True);self.selected_preview.setStyleSheet('font-size:16px;');self.selected_preview.explain_handler=study.source_display.explain_handler
+        layout.addWidget(self.selected_preview)
+        self.context_heading=QLabel('Conversation context');self.context_heading.setObjectName('field');layout.addWidget(self.context_heading)
+        self.context=QPlainTextEdit();self.context.setReadOnly(True);self.context.setMaximumHeight(110)
+        self.context.setPlainText('\n\n'.join(item['text'] for item in self._original_context));self.context.setAccessibleName('Earlier original dialogue used for analysis')
         self.context.hide()
-        context_toggle.toggled.connect(self.context.setVisible)
+        self.context_preview=CopyableLabel(self.context.toPlainText());self.context_preview.setObjectName('contextPreview');self.context_preview.setWordWrap(True);layout.addWidget(self.context_preview)
+        self.context_preview.setVisible(bool(self._original_context));self.context_heading.setVisible(bool(self._original_context))
         local=study.config.analysis_provider=='local'
         notice=QLabel('Explains original speech and nearby dialogue locally.' if local else 'Online analysis sends original transcripts, language choices, glossary and saved examples to your selected provider.')
         notice.setWordWrap(True)
-        layout.addWidget(notice)
+        layout.addWidget(notice);notice.setVisible(not local)
         row=QHBoxLayout()
-        self.run=QPushButton('Explain locally' if local else 'Explain online')
+        self.run=QPushButton('Explain' if local else 'Explain online')
         from ui.icons import icon_button
-        self.cancel=icon_button('close','Cancel analysis',self)
-        self.cancel.setEnabled(False)
+        self.cancel=icon_button('stop','Cancel explanation',self);self.cancel.hide()
+        self.cancel.setEnabled(False);self.cancel.hide()
         self.apply=QPushButton('Use revision')
         self.apply.setEnabled(False);self.apply.hide()
         for button in (self.run,self.cancel,self.apply):
@@ -80,8 +78,6 @@ class SentenceAnalysis(QWidget):
         self.result_layout.setContentsMargins(0,0,0,0)
         self.result_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self.result_cards,1)
-        empty=QLabel('Understand the meaning, informal expressions and possible ambiguity behind this sentence.')
-        empty.setWordWrap(True);empty.setObjectName('hint');self.result_layout.addWidget(empty)
         self.save_example=QPushButton('Remember applied correction as a learning example')
         self.save_example.setEnabled(False)
         self.save_example.hide()
@@ -109,6 +105,7 @@ class SentenceAnalysis(QWidget):
         self.study.text.setPlainText(self.source_text.toPlainText())
 
     def _sync_source(self):
+        self.selected_preview.setText(self.study.text.toPlainText())
         if self.source_text.toPlainText()!=self.study.text.toPlainText():
             with QSignalBlocker(self.source_text):
                 self.source_text.setPlainText(self.study.text.toPlainText())
@@ -155,15 +152,15 @@ class SentenceAnalysis(QWidget):
         self.apply.setEnabled(False)
         self.save_example.setEnabled(False)
         self.run.setEnabled(False)
-        self.cancel.setEnabled(True)
+        self.cancel.setEnabled(True);self.cancel.show();self.run.setText("Explaining…")
         self.feedback.setText(('Loading/analyzing on the local Vulkan GPU model' if config.analysis_provider=='local' else 'Analyzing with '+str(urlsplit(config.analysis_endpoint).hostname)+' / '+config.analysis_model)+'. Live subtitles continue.')
 
     def _finished(self,token,value):
         if token!=self.token:
             return
         self.token=None
-        self.run.setEnabled(True)
-        self.cancel.setEnabled(False)
+        self.run.setEnabled(True);self.run.setText('Explain' if self.study.config.analysis_provider=='local' else 'Explain online')
+        self.cancel.setEnabled(False);self.cancel.hide()
         if 'error' in value:
             self.feedback.setText(value['error'])
             return
@@ -176,8 +173,9 @@ class SentenceAnalysis(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         for heading,key in (('Meaning','source_meaning'),('Translation','translation'),('Informal expressions','explanation'),('Uncertainty','ambiguity')):
+            if not str(value.get(key,'')).strip():continue
             title=QLabel(heading);title.setObjectName('field');self.result_layout.addWidget(title)
-            text=CopyableLabel(value[key] or 'No specific ambiguity reported.');text.setWordWrap(True)
+            text=CopyableLabel(value[key]);text.setWordWrap(True)
             text.setTextFormat(Qt.TextFormat.PlainText)
             text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
             self.result_layout.addWidget(text)
@@ -187,7 +185,7 @@ class SentenceAnalysis(QWidget):
             '\n\nPrevious translation - comparison only\n'+self._comparison_translation)
         duration=value.get('duration_ms',0)/1000
         self.feedback.setText(('Session cache. ' if value.get('cached') else f'Finished in {duration:.1f}s (includes loading if needed). ')+'Review the suggestion before applying it.')
-        self.apply.setEnabled(True);self.apply.show()
+        self.apply.setEnabled(value['translation']!=self._comparison_translation);self.apply.setVisible(value['translation']!=self._comparison_translation)
 
     def _apply(self):
         if not self.candidate:
@@ -223,8 +221,8 @@ class SentenceAnalysis(QWidget):
         if self.token:
             self.service.cancel(self.token)
         self.token=None
-        self.run.setEnabled(True)
-        self.cancel.setEnabled(False)
+        self.run.setEnabled(True);self.run.setText('Explain' if self.study.config.analysis_provider=='local' else 'Explain online')
+        self.cancel.setEnabled(False);self.cancel.hide()
         self.feedback.setText('Cancelled. The in-flight connection will finish or time out in the background; its result will be ignored.')
 
     def dispose(self):

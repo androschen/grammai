@@ -107,8 +107,11 @@ class StorageWidget(QWidget):
     def refresh(self):
         stats=self.replays.stats() if self.replays else {'bytes':0,'limit_bytes':3840000,'clips':0}
         self.ram.setText(f"{stats['bytes']/1024**2:.2f} / {stats['limit_bytes']/1024**2:.2f} MB; {stats['clips']} replayable sentences")
-        stats=self.phrasebook.stats()
-        self.phrases.setText(f"{stats['count']} / 1,000 phrases; {stats['bytes']/1024:.1f} / 2,048 KB")
+        from core.phrasebook import DeckReadError
+        try:
+            stats=self.phrasebook.stats()
+            self.phrases.setText(f"{stats['count']} / 1,000 phrases; {stats['bytes']/1024:.1f} / 2,048 KB")
+        except (DeckReadError,OSError) as exc:self.phrases.setText(str(exc))
         file=data_dir()/'benchmarks.json'
         summary_bytes=file.stat().st_size if file.is_file() else 0
         fixture=data_dir()/'benchmark.wav'

@@ -1,4 +1,5 @@
 """One active and one pending local review; suggestions stay session-only."""
+from dataclasses import replace
 from core.revisions import revised_update
 from ml.phonetics import phonetics_auto
 from time import monotonic
@@ -12,7 +13,7 @@ class LiveReview(QObject):
         self.config,self.events,self.service,self.history,self.is_live=config,events,service,history,is_live
         self.pending=None
         self.active=None
-        self.signature=None
+        self.signature=self.current_signature()
         self.retry_after=0
         self.closed=False
         self.timer=QTimer(self);self.timer.setInterval(400);self.timer.timeout.connect(self.pump);self.timer.start()
@@ -31,41 +32,51 @@ class LiveReview(QObject):
         if self.signature!=signature:
             self.reset();self.signature=signature
 
+    def _state(self,update,status,reason):
+        current=next((item for item in self.history.items() if item.uid==update.uid),None)
+        if not current or (current.native_text,current.target_text,current.revision_count)!=(update.native_text,update.target_text,update.revision_count):return
+        value=replace(current,review_status=status,review_reason=reason)
+        self.history.replace(value);self.events.review_state_changed.emit(value)
+
     def reset(self):
+        if self.pending:self._state(self.pending,'skipped','Review stopped because the session or translation settings changed.')
         self.pending=None
         if self.active:
+            self._state(self.active[1],'skipped','Review stopped because the session or translation settings changed.')
             self.service.cancel(self.active[0])
-        self.active=None
-        self.retry_after=0
+        self.active=None;self.retry_after=0
 
     def defer_for_explanation(self):
-        # Finish the one in-flight review so its loaded model can be reused.
-        # The open-dialog property stops subsequent reviews from starting.
+        if self.pending:self._state(self.pending,'skipped','Review yielded to your requested phrase explanation.')
         self.pending=None
 
     def close(self):
         self.closed=True;self.timer.stop();self.reset()
 
     def enqueue(self,update):
-        if self.closed or self.config.translation_mode!='review' or not self.config.translation_enabled or not self.is_live():
-            return
+        if self.closed:return
+        if self.config.translation_mode!='review' or not self.config.translation_enabled or not self.is_live():
+            self._state(update,'not_requested','Automatic review requires Fast + review mode and an active translation session.');return
         if update.source_language not in ('zh','en','th','id') or update.source_language==update.target_language or len(update.native_text)>1000:
-            return
-        # New speech replaces old pending work; in-flight work is bounded too.
-        self.pending=update
-        self.pump()
+            reason='Original speech already matches the target language.' if update.source_language==update.target_language else 'The transcript language or length is outside automatic review limits.'
+            self._state(update,'skipped',reason);return
+        if self.pending:self._state(self.pending,'skipped','Newer speech replaced this pending review.')
+        self.pending=update;self._state(update,'awaiting','Waiting for the shared local model to review the original speech.');self.pump()
 
     def pump(self):
-        if self.events.property('phrase_explanation_open'):
+        if self.events.property('phrase_explanation_open') or self.events.property('learning_explanation_pending'):
             return
         if self.closed or self.active or not self.pending or self.service.busy or monotonic()<self.retry_after:
             return
         if self.config.translation_mode!='review' or not self.is_live():
-            self.pending=None;return
+            self._state(self.pending,'skipped','Automatic review is no longer active.');self.pending=None;return
         update=self.pending
         items=self.history.items()
         index=next((i for i,item in enumerate(items) if item.uid==update.uid),None)
         if index is None:
+            self.pending=None;return
+        current=items[index]
+        if (current.native_text,current.target_text,current.revision_count)!=(update.native_text,update.target_text,update.revision_count):
             self.pending=None;return
         group=self.history.group_for(update.uid)
         limit=min(3,self.config.analysis_context_sentences)
@@ -76,6 +87,7 @@ class LiveReview(QObject):
         if self.service.refine(token,self.config,payload):
             self.active=(token,update,self.current_signature(),group)
             self.pending=None
+            self._state(update,'reviewing','Local AI is reviewing the original speech and nearby original dialogue.')
 
     def completed(self,token,value):
         if not self.active or self.active[0]!=token:
@@ -83,15 +95,20 @@ class LiveReview(QObject):
         _,original,signature,group=self.active;self.active=None
         if signature!=self.current_signature() or not self.is_live():
             return
-        if 'error' in value:
-            self.retry_after=monotonic()+30
-            self.events.status_changed.emit('Automatic review unavailable; live subtitles continue. '+value['error'])
-            return
         current=next((item for item in self.history.items() if item.uid==original.uid),None)
         if not current or self.history.group_for(current.uid)!=group:
             return
         if (current.native_text,current.target_text,current.revision_count)!=(original.native_text,original.target_text,original.revision_count):
             return
+        if 'error' in value:
+            self.retry_after=monotonic()+30
+            self._state(current,'failed','Local AI review could not complete. Fast translation is retained.')
+            self.events.status_changed.emit('Automatic review unavailable; live subtitles continue. '+str(value['error']))
+            return
         suggestion=value.get('translation','').strip()
-        if suggestion and suggestion!=current.target_text:
-            self.events.subtitle_corrected.emit(revised_update(current,target_text=suggestion,phonetics=phonetics_auto(suggestion),ai_refined=True))
+        if not suggestion:
+            self._state(current,'failed','Local AI returned no usable translation. Fast translation is retained.');return
+        if suggestion==current.target_text:
+            self._state(current,'unchanged','Local AI reviewed this sentence and kept the wording.');return
+        refined=revised_update(current,target_text=suggestion,phonetics=phonetics_auto(suggestion),ai_refined=True,review_status='refined',review_reason='Local AI changed the translation. Reviewed does not mean verified correct.')
+        self.history.replace(refined);self.events.subtitle_corrected.emit(refined)

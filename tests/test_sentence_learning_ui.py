@@ -55,7 +55,7 @@ class SentenceLearningTests(unittest.TestCase):
         self.assertTrue(d.history_section.isVisible());d.reject()
     def test_wrapped_sentence_stays_readable_and_same_language_hides_whole_translation_section(self):
         d=self.make(SubtitleUpdate('', 'same sentence','same sentence',source_language='en',target_language='en'))
-        self.assertTrue(d.translation_section.isHidden());self.assertTrue(d.history_section.isHidden());d.reject()
+        self.assertTrue(d.translation_section.isHidden());self.assertEqual(d.review_status_label.text(),"Not reviewed");self.assertTrue(d.history_section.isHidden());d.reject()
         d=self.make(SubtitleUpdate('', 'Meaning '*80,'Original '*80,source_language='en',target_language='id'))
         d.resize(440,650);d.show();APP.processEvents()
         self.assertGreater(d.source_display.height(),50)

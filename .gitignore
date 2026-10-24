@@ -40,3 +40,10 @@ benchmark.wav
 # Personal learning data
 phrases.json
 phrases.json.tmp
+
+# Personal profile backups and machine-local model discovery
+phrases.json.*
+phrases.before-*.bak
+preferences.json.*
+preferences.before-*.json
+model-locations.json

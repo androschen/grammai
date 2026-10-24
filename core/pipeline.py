@@ -11,7 +11,7 @@ from threading import Event
 import numpy as np
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
-from audio.capture import LoopbackCapture, normalized_rms
+from audio.capture import CapturedAudio, LoopbackCapture, normalized_rms
 from audio.replay import ReplayStore
 from core.config import AppConfig
 from core.events import EventBus
@@ -77,6 +77,7 @@ class InferenceWorker(QThread):
                 self.events.status_changed.emit(f'Speech detector unavailable; using volume gate: {exc}')
         segmenter = SpeechSegmenter(self.config,detector)
         was_paused=False
+        previous_sequence = None
         while not self.isInterruptionRequested():
             if self.pause_requested.is_set():
                 was_paused=True
@@ -91,12 +92,30 @@ class InferenceWorker(QThread):
                         self.queue.get_nowait()
                     except Empty:
                         break
+                previous_sequence = None
+                reset = getattr(self.engine, 'reset_context', None)
+                if reset:
+                    reset()
                 was_paused=False
             try:
                 chunk = self.queue.get(timeout=0.1)
             except Empty:
                 continue
-            if isinstance(chunk, tuple):
+            if isinstance(chunk, CapturedAudio):
+                if previous_sequence is not None and chunk.sequence != previous_sequence + 1:
+                    # Never splice speech across a queue overflow. The unfinished
+                    # fragment and overlap are incomplete evidence for recognition.
+                    if detector is not None:
+                        detector.reset()
+                    segmenter = SpeechSegmenter(self.config, detector)
+                    reset = getattr(self.engine, 'reset_context', None)
+                    if reset:
+                        reset()
+                    self.telemetry.emit({'kind': 'audio_discontinuity',
+                        'missing_chunks': max(0, chunk.sequence - previous_sequence - 1)})
+                previous_sequence = chunk.sequence
+                chunk, captured_at = chunk.samples, chunk.captured_at
+            elif isinstance(chunk, tuple):
                 chunk, captured_at = chunk
             else:
                 captured_at = monotonic()

@@ -47,7 +47,7 @@ class CopyableLabel(QLabel):
         select.triggered.connect(self.select_all)
         if self.explain_handler is not None:
             phrase=self.selectedText().strip()
-            explain=menu.addAction('Explain selected phrase locally')
+            explain=menu.addAction('Create learning card (local AI)')
             explain.setEnabled(bool(phrase) and len(phrase)<=120)
             explain.setToolTip('Select a word or phrase (up to 120 characters).')
             explain.triggered.connect(lambda:self.explain_handler(phrase))

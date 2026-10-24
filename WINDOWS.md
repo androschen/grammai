@@ -2,12 +2,12 @@
 
 ## Install and launch
 
-Run `dist/GrammAI-Setup-0.7.1.exe`. This per-user installer creates a Start menu
+Run `dist/GrammAI-Setup-0.9.8.exe`. This per-user installer creates a Start menu
 entry, an optional desktop shortcut, and an uninstaller. No administrator rights,
 Python installation, terminal, or repository checkout are needed to run the app.
 The first release is unsigned; Windows can identify the publisher as unknown.
 
-Alternatively, extract `dist/GrammAI-Portable-0.7.1.zip`, keep the entire
+Alternatively, extract `dist/GrammAI-Portable-0.9.8.zip`, keep the entire
 extracted `GrammAI` directory together, and launch `GrammAI.exe`. Its `_internal` directory contains the bundled runtime and DLLs.
 Copying only the exe will not work.
 

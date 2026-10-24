@@ -1,4 +1,4 @@
-﻿"""Serialized local-model lifecycle and analysis; bounded session cache."""
+"""Serialized local-model lifecycle and analysis; bounded session cache."""
 from collections import OrderedDict
 from dataclasses import replace, asdict
 import json
@@ -116,18 +116,19 @@ class AnalysisService(QObject):
         if self.busy or self.closing or (self.events and any(self.events.property(p) for p in ('review_busy','local_translation_owned','benchmark_busy'))):
             return False
         from ml.phrase_explanation import explanation_input
+        refresh=bool(payload.get('refresh'))
         payload=explanation_input(payload)
         from pathlib import Path
         path=Path(config.analysis_gguf) if config.analysis_gguf else self.runtime.paths(config)[1]
         version=(str(path),path.stat().st_mtime_ns,path.stat().st_size) if path.is_file() else None
-        key=json.dumps(['phrase-v1',version,config.analysis_executable,config.analysis_context_tokens,
-            config.analysis_explanation_language,payload],sort_keys=True)
+        key=json.dumps(['phrase-v4',version,config.analysis_executable,config.analysis_context_tokens,
+            config.analysis_explanation_language,config.analysis_reasoning,payload],sort_keys=True)
         self.token=token
-        if key in self.cache:
+        if key in self.cache and not refresh:
             value=dict(self.cache[key],cached=True)
             QTimer.singleShot(0,lambda:self.phrase_completed.emit(token,value) if self.token==token else None)
             return True
-        self._start(replace(config,analysis_provider='local',analysis_reasoning=False),payload,'explain',token,key)
+        self._start(replace(config,analysis_provider='local'),payload,'explain',token,key)
         return True
 
     def refine(self,token,config,payload):

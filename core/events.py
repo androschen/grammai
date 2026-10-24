@@ -26,6 +26,8 @@ class SubtitleUpdate:
     original_target_text: str | None = None
     revision_count: int = 0
     ai_refined: bool = False
+    review_status: str = "not_requested"
+    review_reason: str = "Automatic review has not run."
     audio_overlap_seconds: float = 0.
     overlap_previous_text: str = ""
 
@@ -69,6 +71,7 @@ class EventBus(QObject):
     review_requested = Signal(object)
     review_finished = Signal(object)
     review_busy = Signal(bool)
+    review_state_changed = Signal(object)  # Same sentence, review metadata only
     subtitle_corrected = Signal(object)
     replay_requested = Signal(str, float)
     playback_active = Signal(bool)

@@ -18,6 +18,13 @@ from core.events import EventBus
 
 
 @dataclass(frozen=True)
+class CapturedAudio:
+    samples: np.ndarray
+    captured_at: float
+    sequence: int
+
+
+@dataclass(frozen=True)
 class AudioSource:
     device_id: str
     name: str
@@ -112,6 +119,7 @@ class LoopbackCapture(QThread):
         self._queue = queue
         self.stop_requested = False
         self.suppress_audio = Event()
+        self._sequence = 0
 
     def run(self) -> None:
         try:
@@ -148,16 +156,18 @@ class LoopbackCapture(QThread):
         return mic.recorder(samplerate=self._config.sample_rate, channels=None)
 
     def _push(self, chunk: np.ndarray) -> None:
+        packet = CapturedAudio(chunk, monotonic(), self._sequence)
+        self._sequence += 1
         try:
-            self._queue.put_nowait((chunk, monotonic()))
+            self._queue.put_nowait(packet)
         except Full:
             try:
                 dropped = self._queue.get_nowait()
-                self._events.audio_dropped.emit(int(dropped[0].size))
+                self._events.audio_dropped.emit(int(dropped.samples.size if isinstance(dropped, CapturedAudio) else dropped[0].size))
             except Exception:
                 pass
             try:
-                self._queue.put_nowait((chunk, monotonic()))
+                self._queue.put_nowait(packet)
             except Full:
                 pass
 

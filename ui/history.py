@@ -227,8 +227,11 @@ class HistoryPanel(QWidget):
         self._follow_timer.setSingleShot(True)
         self._follow_timer.timeout.connect(self._scroll_bottom)
         scroll.verticalScrollBar().rangeChanged.connect(self._schedule_follow)
-        scroll.verticalScrollBar().actionTriggered.connect(lambda action:self._follow.setChecked(False))
-        self._follow.toggled.connect(self._schedule_follow)
+        self._user_scroll_active=False
+        self._user_scroll_before=0
+        scroll.viewport().installEventFilter(self);scroll.verticalScrollBar().installEventFilter(self)
+        scroll.verticalScrollBar().sliderMoved.connect(self._slider_moved)
+        self._follow.toggled.connect(self._follow_changed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -246,6 +249,33 @@ class HistoryPanel(QWidget):
         self.search.textChanged.connect(self._apply_filter)
         self.language_filter.currentIndexChanged.connect(self._apply_filter)
         layout.addWidget(scroll, 1)
+
+    def eventFilter(self,obj,event):
+        if obj in (self._scroll.viewport(),self._scroll.verticalScrollBar()):
+            kind=event.type()
+            scroll_key=kind==QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Up,Qt.Key.Key_Down,Qt.Key.Key_PageUp,Qt.Key.Key_PageDown,Qt.Key.Key_Home,Qt.Key.Key_End)
+            if kind==QEvent.Type.Wheel or scroll_key or (obj is self._scroll.verticalScrollBar() and kind==QEvent.Type.MouseButtonPress):
+                self._user_scroll_before=self._scroll.verticalScrollBar().value();self._user_scroll_active=True;self._follow_timer.stop()
+                if kind!=QEvent.Type.MouseButtonPress:QTimer.singleShot(0,self._finish_user_scroll)
+            elif obj is self._scroll.verticalScrollBar() and kind==QEvent.Type.MouseButtonRelease:
+                QTimer.singleShot(0,self._finish_user_scroll)
+        return super().eventFilter(obj,event)
+
+    def _slider_moved(self,position):
+        if self._user_scroll_active and position<self._scroll.verticalScrollBar().maximum()-4:self._follow.setChecked(False)
+
+    def _finish_user_scroll(self):
+        if not self._user_scroll_active:return
+        self._user_scroll_active=False
+        bar=self._scroll.verticalScrollBar()
+        if bar.value()!=self._user_scroll_before and bar.value()<bar.maximum()-4:self._follow.setChecked(False)
+        else:self._schedule_follow()
+
+    def _follow_changed(self,enabled):
+        self._follow.setToolTip("Follow new sentences" if enabled else "Reading older sentences. Check Auto-scroll to follow again.")
+        if enabled:
+            self._user_scroll_active=False;self._scroll_bottom()
+        self._schedule_follow()
 
     def append(self, update: SubtitleUpdate) -> None:
         self._empty.hide()
@@ -281,14 +311,14 @@ class HistoryPanel(QWidget):
         return False
 
     def _schedule_follow(self, *args):
-        if self._follow.isChecked() and self._card_count():
+        if self._follow.isChecked() and self._card_count() and not self._user_scroll_active:
             # Let Qt finish deferred wrapping and scroll-content resizing first.
             self._follow_timer.start(16)
         else:
             self._follow_timer.stop()
 
     def _scroll_bottom(self):
-        if not self._follow.isChecked():
+        if not self._follow.isChecked() or self._user_scroll_active:
             return
         # Follow the final sentence, not unused space in the scroll content.
         self._list.activate()
@@ -309,6 +339,7 @@ class HistoryPanel(QWidget):
     def clear(self) -> None:
         self._follow_timer.stop()
         self._selection_timer.stop();self._deferred_updates.clear()
+        self._user_scroll_active=False
         index = 0
         while index < self._list.count():
             widget = self._list.itemAt(index).widget()

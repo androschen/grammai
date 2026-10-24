@@ -126,7 +126,8 @@ class GrammAIApp:
         if self._phrase_dialog is not None:
             self._phrase_dialog.close()
         self._live_review.defer_for_explanation()
-        data=dict(payload,original_text=payload['update'].native_text,
+        data=dict(payload,example_translation=payload['update'].target_text if payload.get('text_role')!='translation' else '',
+            original_text=payload['update'].native_text,
             original_language=payload['update'].source_language,
             context=preceding_context(self._panel._history,payload['update'],2))
         try:
@@ -188,6 +189,7 @@ class GrammAIApp:
         self._live_review.close()
         if self._phrase_dialog is not None:
             self._phrase_dialog.close()
+        self._panel.dispose_learning()
         self._analysis.shutdown()
         self._player.stop()
         self._preference_timer.stop()
@@ -254,6 +256,18 @@ def main() -> int:
     instance=SingleInstance()
     if not instance.acquire():
         return 0
+    # Recover only an absent deck. A deliberately cleared [] deck stays cleared.
+    from core.preferences import data_dir
+    if not (data_dir()/'phrases.json').exists():
+        from core.deck_recovery import recover_deck
+        try:
+            recovery=recover_deck()
+            if recovery['recovered']:
+                import logging
+                logging.getLogger(__name__).warning('Recovered %s cards from redirected launcher storage',recovery['recovered'])
+        except (OSError,ValueError):
+            import logging
+            logging.exception('Saved-card recovery failed; source files were retained')
     from core.paths import register_existing_models
     register_existing_models()
 

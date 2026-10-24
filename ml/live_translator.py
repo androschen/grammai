@@ -50,6 +50,9 @@ class LiveTranslator:
     def remember(self,text,language):
         self.context.append({'text':text[:240],'language':language})
 
+    def reset_context(self):
+        self.context.clear()
+
     def reset_failure(self):
         self.failed=False
         self.fallback.reset_failure()

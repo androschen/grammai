@@ -17,10 +17,14 @@ class StudyDialog(QDialog):
         from ui.sentence_view import build_details
         build_details(self,update,store,analysis,history)
         events.subtitle_corrected.connect(self._external_update)
+        events.review_state_changed.connect(self._external_update)
 
     def _external_update(self,update):
         if update.uid==self.subtitle.uid and not self._busy and self._proposal is None and self.text.toPlainText()==self.subtitle.native_text:
+            metadata_only=(update.native_text,update.target_text,update.revision_count)==(self.subtitle.native_text,self.subtitle.target_text,self.subtitle.revision_count)
             self.subtitle=update
+            if metadata_only:
+                self._refresh_review_status();return
             self.text.setPlainText(update.native_text)
             self._show_result()
 
@@ -159,6 +163,10 @@ class StudyDialog(QDialog):
             self.events.subtitle_corrected.disconnect(self._external_update)
         except (TypeError,RuntimeError):
             pass
+        try:self.events.review_state_changed.disconnect(self._external_update)
+        except (TypeError,RuntimeError):pass
+        try:self.events.playback_active.disconnect(self._playback_changed)
+        except (TypeError,RuntimeError):pass
         self.save_popup.reject()
         if self.analysis_widget:
             self.analysis_widget.dispose()

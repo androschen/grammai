@@ -11,6 +11,7 @@ class SubtitleLabel(QLabel):
         self.shadow=True
         self.setMargin(4)
         self._cached_key=None
+        self.display_text=None
 
     def set_readability(self,outline,shadow):
         if (self.outline,self.shadow)!=(outline,shadow):
@@ -19,7 +20,8 @@ class SubtitleLabel(QLabel):
             self.update()
 
     def _layout(self,width,color,shadow=False,outline=False):
-        layout=QTextLayout(self.text(),self.font())
+        text=self.text() if self.display_text is None else self.display_text
+        layout=QTextLayout(text,self.font())
         option=QTextOption()
         option.setAlignment(self.alignment())
         option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
@@ -29,7 +31,7 @@ class SubtitleLabel(QLabel):
         if outline or shadow:
             fmt.setTextOutline(QPen(QColor(0,0,0,190) if shadow else QColor('#101414'),3 if shadow else 2))
         span=QTextLayout.FormatRange()
-        span.start,span.length,span.format=0,len(self.text().encode('utf-16-le'))//2,fmt
+        span.start,span.length,span.format=0,len(text.encode('utf-16-le'))//2,fmt
         layout.setFormats([span])
         layout.beginLayout()
         height=0
@@ -44,12 +46,12 @@ class SubtitleLabel(QLabel):
         return layout,height
 
     def paintEvent(self,event):
-        if not self.text() or not (self.outline or self.shadow):
+        if self.display_text is None and (not self.text() or not (self.outline or self.shadow)):
             super().paintEvent(event)
             return
         rect=self.contentsRect().adjusted(self.margin(),self.margin(),-self.margin(),-self.margin())
         color=self.palette().color(self.foregroundRole())
-        key=(self.text(),self.font().toString(),rect.width(),color.rgba(),self.outline,self.shadow,self.devicePixelRatioF())
+        key=(self.text(),self.display_text,self.font().toString(),rect.width(),color.rgba(),self.outline,self.shadow,self.devicePixelRatioF())
         if key!=self._cached_key:
             self._foreground,self._text_height=self._layout(rect.width(),color)
             self._outline=self._layout(rect.width(),color,outline=True)[0] if self.outline else None

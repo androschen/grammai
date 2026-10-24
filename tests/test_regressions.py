@@ -103,13 +103,13 @@ class UITests(unittest.TestCase):
         self.assertTrue(model.append(item))
         panel.deleteLater()
 
-    def test_overlay_long_text_resizes(self):
+    def test_overlay_long_text_pages(self):
         overlay = SubtitleOverlay(EventBus(), AppConfig())
         overlay.show()
         item = SubtitleUpdate('pinyin ' * 35, '\u4f60\u597d' * 35, 'source ' * 35)
         overlay.apply_subtitle(item)
         QTest.qWait(50)
-        self.assertGreaterEqual(overlay.height(), 210)
+        self.assertGreater(len(overlay._pages[0][1]),1)
         self.assertEqual(overlay._stack.target.text(), item.target_text)
         overlay.close()
 
