@@ -2,6 +2,61 @@
 
 Versions 0.7.2–0.9.7 below describe local desktop builds first published together in v0.9.8.
 
+## 0.13.0 — Local pronunciation
+
+- Add compact Listen/Stop and normal/slower Windows pronunciation to reply suggestions, saved card details and Practice. Recall mode unlocks pronunciation only after Reveal.
+- Choose an installed voice matching Chinese, Thai, English or Indonesian; show a missing-voice state and recheck control instead of using the wrong language. No automatic voice downloads, model inference or persisted speech files.
+- Keep generated pronunciation separate from saved original conversation audio. Coordinate playback, cancellation, page changes and capture suppression so the app does not transcribe its own voice.
+
+## 0.12.0 — Speaking reply suggestions
+
+- Add an on-demand reply icon to Sentence details. Local Qwen suggests two short replies using only the original transcript and nearby original dialogue, with local Pinyin/Thai romanization and meanings in the configured explanation language.
+- Reuse the existing serialized model service and bounded session cache. No model runs when opening details or saving. Active context translation must be paused explicitly before its model is used for replies; hiding/closing requests cancels them.
+- Validate bounded reply drafts, reject clear language mismatches and show incomplete-context responses instead of guessing. Suggestions remain AI drafts, never sent or graded.
+- Save checked generated replies in a separate popup with notes and the heard question as context. Mark their provenance in the deck and later explanations; never attach the question's recording to a generated response.
+- Invalidate replies and pending save confirmation when the original transcript changes. Preserve existing cards, audio, preferences and review schedules.
+
+## 0.11.1 — Saved time and smoother card saving
+
+- Show the original save date/time on deck rows and card details, with full local date, seconds and UTC offset in the tooltip. Existing recorded timestamps are reused; missing or invalid timestamps are clearly unavailable.
+- Keep creation timestamps unchanged when editing notes or saving the same card again.
+- Close vocabulary and sentence Save to deck popups only after the card and selected audio commit successfully. Failures retain the popup, meaning and notes.
+- Show a brief Card saved confirmation and refresh visible deck cards without discarding unsaved note drafts, filters or Practice progress.
+
+## 0.11.0 — Saved original audio
+
+- Save original sentence audio with vocabulary and sentence cards, with a default-on opt-in toggle and preview when the session clip is available.
+- Replay saved recordings in card details and Practice with one Play/Stop button and 1× / 0.8× speed. Recall mode unlocks audio after Reveal.
+- Keep compressed Opus recordings locally across restarts; cards sharing the same recording use one file. Encoding and decoding run in background jobs, and replay reuses capture feedback suppression.
+- Add a 100 / 250 / 500 MB budget (250 MB default), storage usage and explicit unused-recording cleanup in Settings → Storage. Removing a card's audio preserves its text, notes and schedule; shared recordings remain until their final reference is removed.
+- Support expired clips, missing files and text-only cards without losing card content. Existing cards cannot recover recordings that were never saved.
+
+## 0.10.2 — 2026-10-24
+
+- Apply one compact Save to deck form to selected expressions and full sentences: language badge, expression, pronunciation, editable meaning, conversation example, notes, confirmation and a full-width Save action.
+- Keep word explanations and original context available in an expandable section; selecting translated text remains clearly distinguished from original speech.
+- Prevent save fields from stretching with popup height, keep short meanings free of unnecessary scrollbars, and preserve original conversation snapshots and notes during revisions and retries.
+
+## 0.10.1 — 2026-10-24
+
+- Center noise-threshold markers on the visible audio track in both the header and Audio settings while retaining the larger drag target.
+- Add an explicit gap between the learning card browser and detail pane, with consistent inner padding and aligned reading sections.
+
+## 0.10.0 — 2026-10-24
+
+- Unify all workspaces with one mint-accented light/dark theme, common typography, icons, reading sections, and theme-aware meters and revision highlights.
+- Keep Settings and Resources inside the sidebar shell, alongside Conversation and Learning deck. Capture, subtitles and theme controls stay in the shared header.
+- Preserve unsaved settings drafts when navigating; save merges intentional edits with newer external changes. Audio and subtitle previews revert when leaving Settings. Discard restores saved settings.
+- Show selected conversation rows, retain their highlight after AI refinements, and use a single sentence detail panel with compact-window Back navigation.
+- Simplify subtitle appearance controls, put layout details under Advanced, and present real app CPU, RAM, GPU and GPU memory history in a shared resource page.
+- Keep learning card notes, due dates, Practice state, inference settings, and saved data compatible with previous versions.
+
+## 0.9.9 — 2026-10-24
+
+- Refresh the embedded learning deck with a focused expression header, soft lavender accents, separated word rows, visible notes, and compact language-colored card previews.
+- Add a completed-card progress bar to Practice; retain existing Again/Remembered scheduling and Skip without rescheduling.
+- Keep saved data, on-demand AI requests, keyboard copying, and compact single-window navigation intact. No model or storage format changes.
+
 ## 0.9.8 — 2026-10-24
 
 - Open Learning deck as a persistent main-window page from the sidebar, with Cards and Practice in the same application shell.

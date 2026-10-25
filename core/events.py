@@ -66,6 +66,7 @@ class EventBus(QObject):
     benchmark_progress = Signal(str)
     benchmark_finished = Signal(object)
     benchmark_busy = Signal(bool)
+    card_saved = Signal(object)  # Emitted only after card and optional audio commit
     phrase_explain_requested = Signal(object)
     learning_requested = Signal(object)
     review_requested = Signal(object)
@@ -74,7 +75,10 @@ class EventBus(QObject):
     review_state_changed = Signal(object)  # Same sentence, review metadata only
     subtitle_corrected = Signal(object)
     replay_requested = Signal(str, float)
+    replay_buffer_requested = Signal(str,object,float)  # Explicitly held Save popup preview
     playback_active = Signal(bool)
+    playback_started = Signal(str)
+    playback_position = Signal(str,int,int)
     replay_clear_requested = Signal()
 
     # Fast path: RMS/peak level 0.0â€“1.0, ~20â€“30 Hz from the capture thread.

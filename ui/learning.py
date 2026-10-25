@@ -1,4 +1,4 @@
-"""On-demand sentence study and a text-only saved phrasebook."""
+"""On-demand sentence study and reviewed cards with optional original audio."""
 from PySide6.QtCore import Qt,Slot
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
     QPlainTextEdit,QComboBox,QFormLayout,QDialogButtonBox,QListWidget,QMessageBox,QTabWidget,QWidget,QScrollArea)
@@ -76,6 +76,7 @@ class StudyDialog(QDialog):
             self.feedback.setText('Choose the spoken language and enter 1-4,000 characters.')
             return
         self._busy=True
+        self.reply_suggestions.sync()
         self._proposal=None
         self.apply_recheck.hide()
         self.translate.setEnabled(False)
@@ -137,6 +138,7 @@ class StudyDialog(QDialog):
     def _save(self):
         def report(text):
             self.feedback.setText(text);self.learning_feedback.setText(text)
+        if self.save_fields.audio.busy:return
         if self._busy or self._proposal is not None or getattr(self,'_save_stale',False):
             report('Review the current sentence and confirm it before saving.');return
         if not self.subtitle.native_text.strip() or not self.subtitle.target_text.strip() or self.subtitle.translation_status=='unavailable':
@@ -152,13 +154,22 @@ class StudyDialog(QDialog):
             meaning=self.save_meaning.toPlainText().strip()
             if not meaning or len(meaning)>4000:raise ValueError('Enter a meaning of 1–4,000 characters.')
             value=replace(self.subtitle,target_text=meaning,phonetics=phonetics_auto(meaning))
-            self.phrasebook.save(value,self.notes.toPlainText(),reviewed=True)
-            report('Saved as text only. Open Learning deck from the main window.')
+            notes=self.notes.toPlainText()
+            saved=[]
+            def persist(audio):saved.append(self.phrasebook.save(value,notes,reviewed=True,audio=audio))
+            def finished(error):
+                report(error or 'Saved to Learning deck.')
+                if error is None:
+                    self.reviewed.setChecked(False)
+                    self.events.card_saved.emit(saved[0])
+                    self.save_popup.accept()
+            self.save_fields.audio.commit(persist,finished)
         except (ValueError,OSError) as exc:
             report(str(exc))
 
 
     def done(self,result):
+        self.reply_suggestions.dispose()
         try:
             self.events.subtitle_corrected.disconnect(self._external_update)
         except (TypeError,RuntimeError):

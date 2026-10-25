@@ -33,6 +33,9 @@ class AnalysisWorker(QThread):
             elif self.operation=='explain':
                 from ml.phrase_explanation import explain
                 value=explain(self.config,self.payload,self.runtime,self.progress.emit,self.isInterruptionRequested)
+            elif self.operation=='reply':
+                from ml.reply_suggestions import suggest_replies
+                value=suggest_replies(self.config,self.payload,self.runtime,self.progress.emit,self.isInterruptionRequested)
             elif self.operation=='refine':
                 from ml.qwen_translator import QwenTranslator
                 translator=QwenTranslator(self.config,self.runtime)
@@ -50,7 +53,7 @@ class AnalysisWorker(QThread):
         except Exception as exc:
             value={'error':str(exc)}
         if self.isInterruptionRequested():
-            if self.operation in ('load','compare','refine','explain') or (self.config.analysis_provider=='local' and self.operation=='analyze'):
+            if self.operation in ('load','compare','refine','explain','reply') or (self.config.analysis_provider=='local' and self.operation=='analyze'):
                 self.runtime.close()
         else:
             self.result.emit(value)
@@ -61,6 +64,7 @@ class AnalysisService(QObject):
     comparison_completed=Signal(str,object)
     translation_completed=Signal(str,object)
     phrase_completed=Signal(str,object)
+    replies_completed=Signal(str,object)
     idle=Signal()
     status_changed=Signal(str)
     progress_changed=Signal(str,int)
@@ -131,6 +135,23 @@ class AnalysisService(QObject):
         self._start(replace(config,analysis_provider='local'),payload,'explain',token,key)
         return True
 
+    def suggest_replies(self,token,config,payload):
+        if self.busy or self.closing or (self.events and any(self.events.property(p) for p in ('review_busy','local_translation_owned','benchmark_busy'))):return False
+        from ml.reply_suggestions import reply_input
+        from pathlib import Path
+        payload=reply_input(payload)
+        path=Path(config.analysis_gguf) if config.analysis_gguf else self.runtime.paths(config)[1]
+        version=(str(path),path.stat().st_mtime_ns,path.stat().st_size) if path.is_file() else None
+        key=json.dumps(['replies-v5',version,config.analysis_executable,config.analysis_context_tokens,config.analysis_explanation_language,payload],sort_keys=True)
+        self.token=token
+        if key in self.cache:
+            from copy import deepcopy
+            value=dict(deepcopy(self.cache[key]),cached=True)
+            QTimer.singleShot(0,lambda:self.replies_completed.emit(token,value) if self.token==token else None)
+            return True
+        self._start(replace(config,analysis_provider='local'),payload,'reply',token,key)
+        return True
+
     def refine(self,token,config,payload):
         if self.busy or self.closing or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned') or self.events.property('benchmark_busy'))):
             return False
@@ -160,11 +181,18 @@ class AnalysisService(QObject):
         self.worker.finished.connect(self._finished)
         self._status({'install':'Downloading local AI assets','load':'Loading local GPU model',
             'unload':'Unloading local model','compare':'Local translator comparison','refine':'Reviewing completed translation locally','explain':'Explaining selected phrase locally',
-            'analyze':'Local GPU analysis' if config.analysis_provider=='local' else 'Online analysis'}[operation])
+            'reply':'Suggesting short replies locally','analyze':'Local GPU analysis' if config.analysis_provider=='local' else 'Online analysis'}[operation])
         self.worker.start()
 
     def _result(self,token,key,operation,value):
-        if operation=='explain':
+        if operation=='reply':
+            if self.token==token:
+                if 'error' not in value:
+                    from copy import deepcopy
+                    self.cache[key]=deepcopy(value)
+                    while len(self.cache)>80:self.cache.popitem(last=False)
+                self.replies_completed.emit(token,value)
+        elif operation=='explain':
             if self.token==token:
                 if 'error' not in value:
                     self.cache[key]=dict(value)
@@ -194,7 +222,7 @@ class AnalysisService(QObject):
             self.token=None
             if self.worker:
                 self.worker.requestInterruption()
-                if self.worker.operation in ('load','compare','refine','explain') or (self.worker.config.analysis_provider=='local' and self.worker.operation=='analyze'):
+                if self.worker.operation in ('load','compare','refine','explain','reply') or (self.worker.config.analysis_provider=='local' and self.worker.operation=='analyze'):
                     self.runtime.interrupt()
 
     def shutdown(self):

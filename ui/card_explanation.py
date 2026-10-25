@@ -33,8 +33,11 @@ class CardExplanationWidget(QWidget):
             child=self.reading_layout.takeAt(0).widget()
             if child:child.deleteLater()
         def section(title,text):
-            frame=QFrame();frame.setObjectName('learningFlatSection');box=QVBoxLayout(frame);box.setContentsMargins(0,10,0,12);box.setSpacing(4)
-            heading=QLabel(title);heading.setObjectName('field');box.addWidget(heading)
+            frame=QFrame();frame.setObjectName('learningWhy' if title=='Why this meaning?' else 'learningFlatSection');box=QVBoxLayout(frame);box.setContentsMargins(0,10,0,12);box.setSpacing(4)
+            header=QHBoxLayout();heading=QLabel(title);heading.setObjectName('learningCaption');header.addWidget(heading)
+            if title=='Why this meaning?':
+                header.addStretch();draft=QLabel('AI draft');draft.setObjectName('hint');header.addWidget(draft)
+            box.addLayout(header)
             label=CopyableLabel(text);label.setWordWrap(True);box.addWidget(label);self.reading_layout.addWidget(frame)
         if value:
             from ml.card_explanation import learning_source
@@ -44,22 +47,23 @@ class CardExplanationWidget(QWidget):
             words=value.get('words',[])
             if words:
                 frame=QFrame();frame.setObjectName('learningFlatSection');box=QVBoxLayout(frame);box.setContentsMargins(0,10,0,12)
-                header=QHBoxLayout();heading=QLabel('Word by word');heading.setObjectName('field');header.addWidget(heading);header.addStretch()
+                header=QHBoxLayout();heading=QLabel('Word by word');heading.setObjectName('learningCaption');header.addWidget(heading);header.addStretch()
                 if self.service and payload:
                     from ui.icons import icon_button
                     self.refresh=icon_button('sparkles','Update saved word breakdown locally',self)
                     self.refresh.clicked.connect(lambda:(self.regenerate or self.request)());header.addWidget(self.refresh)
                 box.addLayout(header)
-                grid=QGridLayout();grid.setHorizontalSpacing(14);grid.setVerticalSpacing(10);grid.setColumnStretch(1,1);grid.setColumnMinimumWidth(0,90)
+                grid=QGridLayout();grid.setHorizontalSpacing(14);grid.setVerticalSpacing(8);grid.setColumnStretch(1,1);grid.setColumnMinimumWidth(0,90)
                 for row,word in enumerate(words):
-                    term=QWidget();left=QVBoxLayout(term);left.setContentsMargins(0,0,0,0);left.setSpacing(2);term.setMaximumWidth(115)
+                    term=QWidget();left=QVBoxLayout(term);left.setContentsMargins(0,0,0,0);left.setSpacing(2);term.setFixedWidth(95)
                     text=CopyableLabel(word.get('text',''));text.setObjectName('learningTerm');text.setWordWrap(True);left.addWidget(text)
                     if word.get('pronunciation'):
                         pronunciation=CopyableLabel(word['pronunciation']);pronunciation.setObjectName('hint');pronunciation.setWordWrap(True);left.addWidget(pronunciation)
                     detail=QWidget();right=QVBoxLayout(detail);right.setContentsMargins(0,0,0,0);right.setSpacing(2)
                     meaning=CopyableLabel(word.get('meaning',''));meaning.setWordWrap(True);right.addWidget(meaning)
                     reason=CopyableLabel(word.get('reason',''));reason.setObjectName('hint');reason.setWordWrap(True);right.addWidget(reason)
-                    grid.addWidget(term,row,0,Qt.AlignmentFlag.AlignTop);grid.addWidget(detail,row,1)
+                    tile=QFrame();tile.setObjectName('learningWord');tile_row=QHBoxLayout(tile);tile_row.setContentsMargins(0,10,0,10);tile_row.setSpacing(14)
+                    tile_row.addWidget(term,0,Qt.AlignmentFlag.AlignTop);tile_row.addWidget(detail,1);grid.addWidget(tile,row,0,1,2)
                 box.addLayout(grid);self.reading_layout.addWidget(frame)
             section('Why this meaning?',value.get('why',''))
         available=bool(self.service and payload and self.config)

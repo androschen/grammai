@@ -37,7 +37,7 @@ def load_config() -> AppConfig:
     if not isinstance(saved, dict):
         return config
     # Capture format is internal; only restore user-facing preferences.
-    names = {"target_language", "source_language", "audio_device_id", "audio_device_name",
+    names = {"saved_audio_limit_mb", "target_language", "source_language", "audio_device_id", "audio_device_name",
              "audio_device_kind", "noise_threshold", "quality_mode", "cpu_threads",
              "translation_mode", "translation_enabled", "translation_threads", "backend", "vulkan_executable", "vulkan_model",
              "theme", "show_overlay", "show_pronunciation", "subtitle_font_size", "overlay_opacity",
@@ -68,6 +68,7 @@ def load_config() -> AppConfig:
         config.translation_mode = "fast"
     if config.theme not in ("dark", "light"):
         config.theme = "dark"
+    if config.saved_audio_limit_mb not in (100,250,500):config.saved_audio_limit_mb=250
     config.cpu_threads = max(1, min(16, config.cpu_threads))
     config.translation_threads = max(1, min(8, config.translation_threads))
     config.noise_threshold = max(.01, min(.8, config.noise_threshold))

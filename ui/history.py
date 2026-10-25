@@ -30,7 +30,7 @@ def source_language_badge(language):
                'th':('TH','Thai'),'id':('ID','Indonesian')}
     code,name=languages.get(language,('??','Unknown'))
     badge=QLabel(code)
-    badge.setObjectName('sourceLanguageBadge')
+    badge.setObjectName('sourceLanguageBadge');badge.setProperty('language',language)
     badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
     badge.setToolTip('Original speech: '+name)
     badge.setAccessibleName('Original speech language: '+name)
@@ -173,6 +173,7 @@ class HistoryPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._selected_uid=None
         header = QLabel("Session history")
         header.setObjectName("field")
 
@@ -302,7 +303,7 @@ class HistoryPanel(QWidget):
                 self._list.takeAt(index)
                 old.hide()
                 old.deleteLater()
-                card=HistoryCard(update)
+                card=HistoryCard(update);card.setProperty('selected',update.uid==self._selected_uid)
                 card.study_requested.connect(self.study_requested.emit)
                 card.explain_requested.connect(self.explain_requested.emit)
                 self._list.insertWidget(index,card)
@@ -386,6 +387,13 @@ class HistoryPanel(QWidget):
         self._empty.setVisible(not visible)
         self._count.setText(f'{visible} / {total} lines' if query or language else ('1 line' if total==1 else f'{total} lines'))
         self._schedule_follow()
+
+    def select_sentence(self,uid):
+        self._selected_uid=uid
+        for index in range(self._list.count()):
+            card=self._list.itemAt(index).widget()
+            if isinstance(card,HistoryCard):
+                card.setProperty('selected',card.subtitle.uid==uid);card.style().unpolish(card);card.style().polish(card);card.update()
 
     def _refresh_count(self) -> None:
         n = self._card_count()

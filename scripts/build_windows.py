@@ -14,6 +14,8 @@ def main():
     parser.add_argument('--register-models',action='store_true',help='Record existing development models in this user profile, never in the bundle')
     args=parser.parse_args()
     root=Path(__file__).resolve().parents[1]
+    # Direct script execution otherwise puts only scripts/ on the import path.
+    if str(root) not in sys.path:sys.path.insert(0,str(root))
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QIcon
     app=QApplication.instance() or QApplication([])

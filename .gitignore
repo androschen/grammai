@@ -47,3 +47,7 @@ phrases.before-*.bak
 preferences.json.*
 preferences.before-*.json
 model-locations.json
+
+# Saved private card recordings
+*.ogg
+*.opus

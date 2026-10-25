@@ -2,7 +2,7 @@
 from pathlib import Path
 from PySide6.QtCore import QObject,QRunnable,QThreadPool,Signal,Slot,QTimer,QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QWidget,QVBoxLayout,QFormLayout,QLabel,QPushButton,QMessageBox
+from PySide6.QtWidgets import QWidget,QVBoxLayout,QFormLayout,QLabel,QPushButton,QMessageBox,QComboBox
 from core.preferences import data_dir,write_json
 from core.phrasebook import Phrasebook
 
@@ -63,14 +63,24 @@ class StorageWidget(QWidget):
         for label in (self.ram,self.phrases,self.models,self.benchmarks):
             label.setWordWrap(True)
         form.addRow('Replay audio (RAM only)',self.ram)
-        form.addRow('Learning deck (text only)',self.phrases)
+        form.addRow('Learning deck',self.phrases)
+        self.saved_audio=QLabel('Checking saved audio…');self.saved_audio.setWordWrap(True)
+        form.addRow('Saved original audio',self.saved_audio)
+        self.audio_limit=QComboBox()
+        for amount in (100,250,500):self.audio_limit.addItem(f'{amount} MB',amount)
+        self.audio_limit.setCurrentIndex(max(0,self.audio_limit.findData(config.saved_audio_limit_mb)))
+        self.audio_limit.setAccessibleName('Saved audio storage limit')
+        form.addRow('Audio storage limit',self.audio_limit)
         form.addRow('Benchmark summaries',self.benchmarks)
         form.addRow('Local models',self.models)
         layout.addLayout(form)
-        hint=QLabel('Replay expires after 60 seconds and on device changes or Quit. No audio archive is created. Only phrases you explicitly save persist; the phrasebook is limited to 1,000 entries and 2 MB.')
+        hint=QLabel('Replay expires after 60 seconds and on device changes or Quit. Only recordings you include when saving a card persist. Shared clips are stored once; referenced recordings are never automatically deleted. Card text is limited to 1,000 entries and 2 MB.')
         hint.setWordWrap(True)
         hint.setObjectName('hint')
         layout.addWidget(hint)
+        self._audio_scanning=False
+        self.clean_audio=QPushButton('Clean unused recordings');self.clean_audio.clicked.connect(self._clean_audio);layout.addWidget(self.clean_audio)
+        self.audio_limit.currentIndexChanged.connect(lambda *_:self.scan_audio())
         clear=QPushButton('Clear replay RAM')
         clear.setEnabled(replays is not None)
         clear.clicked.connect(events.replay_clear_requested.emit)
@@ -95,10 +105,11 @@ class StorageWidget(QWidget):
         self.timer=QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.refresh)
-        self.refresh()
+        self.refresh();self.scan_audio()
 
     def set_active(self,active):
         if active:
+            self.scan_audio()
             self.refresh()
             self.timer.start()
         else:
@@ -118,6 +129,28 @@ class StorageWidget(QWidget):
         fixture_bytes=fixture.stat().st_size if fixture.is_file() else 0
         self.benchmarks.setText(f'{summary_bytes/1024:.1f} KB summaries + {fixture_bytes/1024:.1f} KB fixed test audio (not a recording)')
 
+    def scan_audio(self,clean=False):
+        if self._audio_scanning:return
+        from audio.library import AudioLibrary
+        from audio.tasks import AudioTask
+        self._audio_scanning=True;self.clean_audio.setEnabled(False)
+        library=AudioLibrary(self.audio_limit.currentData() or 250)
+        def work():
+            book=Phrasebook()
+            if clean:library.cleanup(lambda:book.items(force=True))
+            return library.stats(book.items(force=True))
+        self._audio_task=AudioTask(work);self._audio_task.signals.ready.connect(self._audio_done)
+        QThreadPool.globalInstance().start(self._audio_task)
+
+    def _audio_done(self,result,error):
+        self._audio_scanning=False;self.clean_audio.setEnabled(True)
+        if error:self.saved_audio.setText('Audio storage unavailable: '+error);return
+        self.saved_audio.setText(f"{result['bytes']/1024**2:.2f} / {(self.audio_limit.currentData() or 250)} MB · {result['clips']} recordings · {result['unused_bytes']/1024**2:.2f} MB unused")
+        self.clean_audio.setEnabled(result['unused_bytes']>0)
+
+    def _clean_audio(self):
+        self.scan_audio(clean=True)
+
     def scan_models(self):
         if self._scanning:
             return
@@ -136,8 +169,9 @@ class StorageWidget(QWidget):
         if QMessageBox.question(self,'Delete saved phrases?','Permanently delete all saved phrases and notes?')==QMessageBox.StandardButton.Yes:
             try:
                 self.phrasebook.clear()
+                self.scan_audio()
                 self.refresh()
-            except OSError as exc:
+            except (OSError,ValueError) as exc:
                 QMessageBox.warning(self,'Could not clear phrases',str(exc))
 
     def _clear_benchmarks(self):

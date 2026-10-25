@@ -29,4 +29,4 @@ def answer_text(item,mode='understand'):
 
 
 def card_search_text(item):
-    return ' '.join(str(item.get(k,'')) for k in ('native_text','target_text','native_phonetics','notes','usage_note','example_sentence'))
+    return ' '.join(str(item.get(k,'')) for k in ('native_text','target_text','native_phonetics','notes','usage_note','example_sentence','reply_question','reply_label'))

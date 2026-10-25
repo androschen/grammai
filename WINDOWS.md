@@ -2,12 +2,12 @@
 
 ## Install and launch
 
-Run `dist/GrammAI-Setup-0.9.8.exe`. This per-user installer creates a Start menu
+Run `dist/GrammAI-Setup-0.13.0.exe`. This per-user installer creates a Start menu
 entry, an optional desktop shortcut, and an uninstaller. No administrator rights,
 Python installation, terminal, or repository checkout are needed to run the app.
-The first release is unsigned; Windows can identify the publisher as unknown.
+This release is unsigned; Windows can identify the publisher as unknown.
 
-Alternatively, extract `dist/GrammAI-Portable-0.9.8.zip`, keep the entire
+Alternatively, extract `dist/GrammAI-Portable-0.13.0.zip`, keep the entire
 extracted `GrammAI` directory together, and launch `GrammAI.exe`. Its `_internal` directory contains the bundled runtime and DLLs.
 Copying only the exe will not work.
 
@@ -21,11 +21,9 @@ It compares source text locally using already installed models. Live translation
 ratings and custom text remain in RAM only and are cleared when the window closes.
 
 Details opens a resizable panel beside history. Select another sentence to switch
-without dismissing a dialog. On narrow screens the setup sidebar is temporarily
-hidden so history and sentence details remain usable.
+without dismissing a dialog. On narrow screens, use the inline Back action to return to conversation history.
 
-Original speech and its pronunciation appear above the translation card. Play,
-0.8x playback, Stop, and Recheck are grouped together. Edit transcript reveals the
+Original speech and its pronunciation appear above the translation card. One Play/Stop control replays the audio; speed and recheck tools are nearby. Edit transcript reveals the
 editor and language choices. Compare original highlights changed wording.
 Recheck suggestions still require Apply revision; revisions never claim verified
 accuracy. Meaning & context presents analysis as readable sections.
@@ -83,4 +81,4 @@ capture, click-through overlay behavior and hardware drivers on a clean PC.
 
 ## Release versioning
 
-The current release is **0.7.1**, tagged **v0.7.1** in Git. Version values are synchronized in `core/version.py`, `packaging/version.txt`, and `packaging/installer.iss`. Build the installer and portable archive with `python -m scripts.build_windows --installer`. These generated binaries and model weights are not committed to the repository. See `CHANGELOG.md` for release notes.
+The current release is **0.13.0**, tagged **v0.13.0** in Git. Version values are synchronized in `core/version.py`, `packaging/version.txt`, and `packaging/installer.iss`. Build the installer and portable archive with `python -m scripts.build_windows --installer`. These generated binaries and model weights are not committed to the repository. See `CHANGELOG.md` for release notes.

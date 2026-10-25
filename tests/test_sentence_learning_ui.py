@@ -3,6 +3,7 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import unittest
 from unittest.mock import Mock
+from PySide6.QtTest import QTest
 from PySide6.QtCore import QObject,Signal
 from PySide6.QtWidgets import QApplication
 from core.config import AppConfig
@@ -48,7 +49,7 @@ class SentenceLearningTests(unittest.TestCase):
         d=self.make(revised_update(first,target_text='Refined meaning',ai_refined=True));d.resize(440,600);d.show();APP.processEvents()
         def geometry():
             return [(w.y(),w.height()) for w in (d.reading_section,d.translation_section,d.history_section)]
-        before=geometry();d.resize(440,1000);APP.processEvents();after=geometry()
+        QTest.qWait(20);before=geometry();d.resize(440,1000);QTest.qWait(20);after=geometry()
         self.assertEqual(before,after)
         self.assertLess(d.source_display.height(),80);self.assertLess(d.translation_display.height(),80)
         self.assertGreater(d.translation_section.y(),d.reading_section.geometry().bottom())

@@ -4,13 +4,14 @@ from PySide6.QtGui import QIcon,QIconEngine,QPainter,QPen,QPixmap,QPalette,QColo
 from PySide6.QtWidgets import QPushButton,QApplication
 
 class LineIcon(QIconEngine):
-    def __init__(self,name):super().__init__();self.name=name
-    def clone(self):return LineIcon(self.name)
+    def __init__(self,name,tone='normal'):super().__init__();self.name=name;self.tone=tone
+    def clone(self):return LineIcon(self.name,self.tone)
     def pixmap(self,size,mode,state):
         pix=QPixmap(size);pix.fill(Qt.GlobalColor.transparent);p=QPainter(pix);self.paint(p,QRectF(0,0,size.width(),size.height()),mode,state);p.end();return pix
     def paint(self,painter,rect,mode,state):
         p=painter;p.save();p.setRenderHint(QPainter.RenderHint.Antialiasing);p.translate(rect.x(),rect.y());p.scale(rect.width()/24,rect.height()/24)
-        color=QColor('#e7eded' if QApplication.instance().property('grammai_theme')!='light' else '#24372e')
+        from ui.theme_tokens import palette_for
+        colors=palette_for(QApplication.instance().property('grammai_theme'));color=QColor(colors['muted'] if mode==QIcon.Mode.Disabled else colors['bg'] if self.tone=='primary' else colors['ink'])
         p.setPen(QPen(color,1.7,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin));p.setBrush(Qt.BrushStyle.NoBrush)
         def line(a,b,c,d):p.drawLine(QPointF(a,b),QPointF(c,d))
         n=self.name
@@ -19,11 +20,16 @@ class LineIcon(QIconEngine):
         if n in ('cc','cc-on'):
             if n=='cc-on':
                 p.setBrush(color);p.drawRoundedRect(QRectF(2,4,20,15),2,2)
-                inverse=QColor('#111617' if QApplication.instance().property('grammai_theme')!='light' else '#f3f6f3')
+                inverse=QColor(colors['bg'])
                 p.setPen(QPen(inverse,1.9,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
             else:p.drawRoundedRect(QRectF(2,4,20,15),2,2)
             p.setBrush(Qt.BrushStyle.NoBrush)
             for x in (5,13):p.drawArc(QRectF(x,8,6,7),45*16,270*16)
+        elif n=='speaker':
+            for segment in ((3,9,7,9),(7,9,12,5),(12,5,12,19),(12,19,7,15),(7,15,3,15),(3,15,3,9)):line(*segment)
+            p.drawArc(QRectF(10,7,9,10),-65*16,130*16);p.drawArc(QRectF(9,3,14,18),-60*16,120*16)
+        elif n=='refresh':
+            p.drawArc(QRectF(4,4,16,16),35*16,290*16);line(19,3,20,8);line(20,8,15,8)
         elif n=='sliders':
             for y,x in ((6,9),(12,16),(18,7)):
                 line(3,y,x-2,y);line(x+2,y,21,y);p.drawEllipse(QRectF(x-2,y-2,4,4))
@@ -47,7 +53,7 @@ class LineIcon(QIconEngine):
         elif n=='search':p.drawEllipse(QRectF(4,4,12,12))
         p.restore()
 
-def set_button_icon(button,name):button.setIcon(QIcon(LineIcon(name)));button.setIconSize(QSize(19,19))
+def set_button_icon(button,name,tone='normal'):button.setIcon(QIcon(LineIcon(name,tone)));button.setIconSize(QSize(19,19))
 def icon_button(name,label,parent=None):
     button=QPushButton(parent);button.setObjectName('iconButton');button.setFixedSize(36,36);button.setToolTip(label);button.setAccessibleName(label);set_button_icon(button,name);return button
 

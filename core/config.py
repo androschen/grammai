@@ -93,6 +93,7 @@ class AppConfig:
     backend: str = "cpu"
     vulkan_executable: str = ""
     vulkan_model: str = ""
+    saved_audio_limit_mb: int = 250
     theme: str = "dark"
     show_overlay: bool = True
     show_pronunciation: bool = True

@@ -26,15 +26,23 @@ class ResourceGraph(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRectF(6, 27, max(1, self.width()-12), max(1, self.height()-48))
-        color = self.palette().color(self.foregroundRole())
+        from PySide6.QtWidgets import QApplication
+        from ui.theme_tokens import palette_for
+        colors=palette_for(QApplication.instance().property('grammai_theme'))
+        color=QColor(colors['ink'])
         painter.setPen(color)
         painter.drawText(6, 17, self.title)
         points = self._points()
         now = monotonic()
+        if len(self.fields)==1:
+            value=points[-1][1].get(self.fields[0][0]) if points else None
+            label=(f'{value:.1f} {self.unit}' if self.unit=='%' else f'{value:.0f} {self.unit}') if value is not None else 'Unavailable'
+            x=self.width()-6-painter.fontMetrics().horizontalAdvance(label)
+            if x>painter.fontMetrics().horizontalAdvance(self.title)+14:painter.drawText(x,17,label)
         values = [data[key] for stamp, data in points for key, _, _ in self.fields
                   if now-120 <= stamp <= now and data.get(key) is not None]
         top = self.maximum or max(1, max(values, default=1)*1.15)
-        painter.setPen(QPen(QColor(128,128,128,55), 1))
+        painter.setPen(QPen(QColor(colors['line']),1))
         for fraction in (0, .5, 1):
             y = rect.top()+fraction*rect.height()
             painter.drawLine(QPointF(rect.left(),y), QPointF(rect.right(),y))
@@ -53,12 +61,12 @@ class ResourceGraph(QWidget):
                 else:
                     path.moveTo(point)
                 connected = True
-            painter.setPen(QPen(QColor(hue),2))
+            painter.setPen(QPen(QColor(colors.get(hue,hue)),2))
             painter.drawPath(path)
         for stamp, label in self.events.property('resource_markers') or ():
             if now-120 <= stamp <= now:
                 x = rect.right()-(now-stamp)/120*rect.width()
-                painter.setPen(QPen(QColor(235,174,64,90),1,Qt.PenStyle.DotLine))
+                painter.setPen(QPen(QColor(colors['alert']),1,Qt.PenStyle.DotLine))
                 painter.drawLine(QPointF(x,rect.top()),QPointF(x,rect.bottom()))
         painter.setPen(color)
         painter.drawText(6,self.height()-5,'2 min ago')

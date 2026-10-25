@@ -129,9 +129,10 @@ class GrammAIApp:
         data=dict(payload,example_translation=payload['update'].target_text if payload.get('text_role')!='translation' else '',
             original_text=payload['update'].native_text,
             original_language=payload['update'].source_language,
+            audio_id=payload['update'].audio_id,
             context=preceding_context(self._panel._history,payload['update'],2))
         try:
-            dialog=PhraseExplanationDialog(self._config,self._events,self._analysis,data,self._phrasebook,self._panel)
+            dialog=PhraseExplanationDialog(self._config,self._events,self._analysis,data,self._phrasebook,self._panel,replays=self._pipeline.replays)
         except ValueError as exc:
             self._panel.set_status(str(exc));return
         self._events.setProperty('phrase_explanation_open',True)
@@ -192,6 +193,8 @@ class GrammAIApp:
         self._panel.dispose_learning()
         self._analysis.shutdown()
         self._player.stop()
+        speech=getattr(self._events,'pronunciation_service',None)
+        if speech is not None:speech.stop()
         self._preference_timer.stop()
         self._save_preferences()
         self._monitor.timer.stop()

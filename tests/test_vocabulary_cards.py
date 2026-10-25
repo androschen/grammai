@@ -109,7 +109,10 @@ class VocabularyCards(unittest.TestCase):
             d.meaning.setPlainText('Edited contextual meaning');self.assertFalse(d.checked.isChecked())
             d.checked.setChecked(True);d._save();self.assertEqual(self.book.items()[0]['notes'],'My final note')
             self.assertEqual(self.book.items()[0]['target_text'],'Edited contextual meaning')
-            d.request();d.completed(d.token,dict(error='Unavailable'))
+            self.assertTrue(d.closed)
+            # A successful save now closes the popup; retry/cancel belong to a new draft.
+            d=PhraseExplanationDialog(AppConfig(),events,service,PAYLOAD,self.book);QTest.qWait(10)
+            d.notes.setPlainText('My final note');d.completed(d.token,dict(error='Unavailable'))
             self.assertFalse(d.save.isEnabled());self.assertEqual(d.notes.toPlainText(),'My final note')
             d.request();stale=d.token;d.cancel_request();d.completed(stale,VALUE)
             self.assertIsNone(d.value);self.assertFalse(d.save.isEnabled());d.reject()

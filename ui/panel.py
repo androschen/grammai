@@ -1,5 +1,5 @@
 """Task-focused main window: choose audio/languages, start, read subtitles."""
-from PySide6.QtCore import Qt, Slot, QEvent
+from PySide6.QtCore import Qt, Slot, QEvent, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QPixmap, QPainter, QColor
 from PySide6.QtWidgets import (QApplication,QCheckBox,QComboBox,QFrame,QHBoxLayout,
     QLabel,QMenu,QPushButton,QScrollArea,QSplitter,QSystemTrayIcon,QVBoxLayout,QWidget,QStackedWidget,QButtonGroup)
@@ -29,7 +29,7 @@ class ControlPanel(QWidget):
         super().__init__()
         self._config,self._events=config,events
         self._replays=replays
-        self._quitting=False;self._deck_page=None;self._active_page='conversation'
+        self._quitting=False;self._deck_page=None;self._settings_page=None;self._resources_page=None;self._active_page='conversation'
         self._status_message='Ready. Start translation to begin.'
         self._history=SessionHistory()
         self._latest_id=None
@@ -43,6 +43,9 @@ class ControlPanel(QWidget):
         available=screen.availableGeometry() if screen else None
         self.resize(min(1040,available.width()-48) if available else 1040, min(800,available.height()-48) if available else 800)
         self._build_ui()
+        self._save_notice=QLabel('✓ Card saved',self);self._save_notice.setObjectName('saveNotice');self._save_notice.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,True);self._save_notice.hide()
+        self._notice_timer=QTimer(self);self._notice_timer.setSingleShot(True);self._notice_timer.timeout.connect(self._save_notice.hide)
+        events.card_saved.connect(self._card_saved)
         self._tray=self._build_tray()
         self.set_subtitles_on(False)
         events.status_changed.connect(self.set_status)
@@ -66,17 +69,17 @@ class ControlPanel(QWidget):
         self._nav_deck=icon_button('bookmark','Learning deck',self);self._nav_deck.setCheckable(True);self._nav_deck.clicked.connect(self._open_phrasebook);nav.addWidget(self._nav_deck)
         self._navigation=QButtonGroup(self);self._navigation.setExclusive(True);self._navigation.addButton(self._nav_conversation);self._navigation.addButton(self._nav_deck)
         nav.addStretch()
-        performance=icon_button('chart','Performance and models',self);performance.clicked.connect(lambda:self._open_settings(3));nav.addWidget(performance)
-        settings=icon_button('settings','Settings',self);settings.clicked.connect(lambda:self._open_settings(0));nav.addWidget(settings)
+        self._nav_resources=icon_button('chart','Resources',self);self._nav_resources.setCheckable(True);self._nav_resources.clicked.connect(lambda:self._show_page('resources'));nav.insertWidget(nav.count()-1,self._nav_resources);self._navigation.addButton(self._nav_resources)
+        self._nav_settings=icon_button('settings','Settings',self);self._nav_settings.setCheckable(True);self._nav_settings.clicked.connect(lambda:self._open_settings(None));nav.addWidget(self._nav_settings);self._navigation.addButton(self._nav_settings)
         outer.addWidget(rail)
         content=QWidget();body=QVBoxLayout(content);body.setContentsMargins(18,12,18,12);body.setSpacing(10);outer.addWidget(content,1)
-        header=QHBoxLayout();self._header_layout=header;self._page_title=QLabel('Conversation');self._page_title.setObjectName('field');header.addWidget(self._page_title);header.addStretch()
+        header=QHBoxLayout();self._header_layout=header;self._page_title=QLabel('Conversation');self._page_title.setObjectName('pageTitle');header.addWidget(self._page_title);header.addStretch()
         self._badge=QLabel('Ready');self._badge.setObjectName('hint');header.addWidget(self._badge)
         self._overlay_toggle=icon_button('cc','Floating subtitles',self);self._overlay_toggle.setCheckable(True);self._overlay_toggle.setChecked(self._config.show_overlay)
         self._overlay_toggle.toggled.connect(self._overlay_visibility_changed);header.addWidget(self._overlay_toggle)
         self._theme_button=icon_button('sun','Switch to light mode',self);self._theme_button.clicked.connect(self._toggle_theme);header.addWidget(self._theme_button);body.addLayout(header)
         self._session_host=QWidget();session=QHBoxLayout(self._session_host);session.setContentsMargins(0,0,0,0);session.setSpacing(8);self._session_layout=session
-        self._toggle=icon_button('play','Start translation',self);self._toggle.setCheckable(True);self._toggle.clicked.connect(self._on_toggle_clicked);session.addWidget(self._toggle)
+        self._toggle=icon_button('play','Start translation',self);self._toggle.setCheckable(True);self._toggle.clicked.connect(self._on_toggle_clicked);header.insertWidget(3,self._toggle)
         self._device=QComboBox();self._device.setAccessibleName('Audio source');self._device.addItem('Desktop audio (default)','');self._sources=[]
         try:self._sources=list_audio_sources()
         except Exception:pass
@@ -107,7 +110,7 @@ class ControlPanel(QWidget):
         self._workspace=QSplitter(Qt.Orientation.Horizontal);self._workspace.setChildrenCollapsible(False)
         self._history_panel=HistoryPanel(self);self._history_panel.cleared.connect(self.clear_history);self._history_panel.study_requested.connect(self._events.learning_requested.emit);self._history_panel.explain_requested.connect(self._events.phrase_explain_requested.emit)
         self._workspace.addWidget(self._history_panel)
-        self._details_host=QWidget();self._details_layout=QVBoxLayout(self._details_host);self._details_layout.setContentsMargins(0,0,0,0);self._workspace.addWidget(self._details_host);self._details_host.hide();self._details_view=None
+        self._details_host=QFrame();self._details_host.setObjectName('sentenceDetails');self._details_layout=QVBoxLayout(self._details_host);self._details_layout.setContentsMargins(0,0,0,0);self._workspace.addWidget(self._details_host);self._details_host.hide();self._details_view=None
         self._workspace.setStretchFactor(0,1)
         self._pages=QStackedWidget();self._pages.addWidget(self._workspace);body.addWidget(self._pages,1)
         self._status=QLabel('Ready. Start translation to begin.');self._status.setObjectName('hint');self._status.setTextFormat(Qt.TextFormat.PlainText);self._status.setWordWrap(True);body.addWidget(self._status)
@@ -119,6 +122,9 @@ class ControlPanel(QWidget):
     def _refresh_audio_control(self):
         kind='Mic' if self._config.audio_device_kind=='mic' else 'Desktop'
         full=kind+' · '+(self._config.audio_device_name or 'Default speakers')
+        index=self._device.findData(self._config.audio_device_id)
+        if index<0:self._device.addItem(full,self._config.audio_device_id)
+        else:self._device.setItemText(index,full)
         self._device.setToolTip(full+' · Select audio device')
         self._device.setAccessibleName(full+'. Select audio device')
         threshold=round(self._config.noise_threshold*100)
@@ -152,7 +158,7 @@ class ControlPanel(QWidget):
 
     def _refresh_route(self):
         source=self._config.source_language
-        source='Auto' if source=='auto' else source.upper()
+        source='Auto' if source.startswith('auto') else {'zh':'CN'}.get(source,source.upper())
         self._route.setText(source+' → '+self._config.target_language.value.upper())
         self._route.setToolTip(self._source.currentText()+' → '+self._language.currentText())
 
@@ -164,11 +170,12 @@ class ControlPanel(QWidget):
         if self._details_view is not None:
             self._details_view.reject()
         self._details_view=dialog
-        dialog.setParent(self._details_host,Qt.WindowType.Widget)
+        dialog.setParent(self._details_host,Qt.WindowType.Widget);dialog.setStyleSheet('')
         self._details_layout.addWidget(dialog)
         dialog.finished.connect(lambda result:self._close_details(dialog))
         self._details_host.show()
-        dialog.show()
+        dialog.show();self._adapt_workspace()
+        self._history_panel.select_sentence(dialog.subtitle.uid)
         screen=self.screen().availableGeometry()
         self._workspace.setSizes([max(320,self.width()-460),420])
 
@@ -177,7 +184,7 @@ class ControlPanel(QWidget):
         dialog.deleteLater()
         if self._details_view is dialog:
             self._details_view=None
-            self._details_host.hide()
+            self._details_host.hide();self._history_panel.show();self._history_panel.select_sentence(None)
 
 
     def _build_tray(self):
@@ -224,9 +231,15 @@ class ControlPanel(QWidget):
         self._events.state_changed.emit(self._config.snapshot())
 
     def _open_settings(self,page=0):
-        dialog=SettingsDialog(self._config,self._events,self,page=page,replays=self._replays)
-        dialog.exec()
-        dialog.deleteLater()
+        self._show_page('settings',settings_page=page)
+
+    def _reset_settings(self,page):
+        old=self._settings_page;self._settings_page=None
+        self._pages.removeWidget(old);old.dispose();old.deleteLater()
+        self._open_settings(page)
+
+    def _compare_resources(self):
+        self._open_settings(3);self._settings_page.model_tabs.setCurrentIndex(2)
 
     @Slot(float)
     def _on_audio_level(self,level):
@@ -239,7 +252,7 @@ class ControlPanel(QWidget):
             self._applied_theme=self._config.theme
             self.setStyleSheet(style_for(self._config.theme))
             if self._details_view is not None:
-                self._details_view.setStyleSheet(style_for(self._config.theme))
+                self._details_view.setStyleSheet('');self._details_view._refresh_details()
         self._refresh_theme_control()
         self._refresh_audio_control()
         self._translation_toggle.blockSignals(True)
@@ -285,24 +298,54 @@ class ControlPanel(QWidget):
     def _open_phrasebook(self):
         self._show_page('deck')
 
-    def _show_page(self,page):
+    def _show_page(self,page,settings_page=None):
+        if self._active_page=='settings' and page!='settings' and self._settings_page:self._settings_page.suspend()
         if page=='deck':
             if self._deck_page is None:
                 from core.phrasebook import Phrasebook
                 from ui.deck import LearningDeckPage
-                self._deck_page=LearningDeckPage(self._config,Phrasebook(),self,events=self._events,service=getattr(self._events,'analysis_service',None))
-                self._pages.addWidget(self._deck_page)
-            self._deck_page.activate();self._pages.setCurrentWidget(self._deck_page)
-            self._header_layout.insertWidget(2,self._toggle);self._session_host.hide()
+                self._deck_page=LearningDeckPage(self._config,Phrasebook(),self,events=self._events,service=getattr(self._events,'analysis_service',None));self._pages.addWidget(self._deck_page)
+            self._deck_page.activate();target=self._deck_page
+        elif page=='settings':
+            if self._settings_page is None:
+                from ui.settings import SettingsPage
+                self._settings_page=SettingsPage(self._config,self._events,self,replays=self._replays);self._settings_page.reset_requested.connect(self._reset_settings);self._pages.addWidget(self._settings_page)
+            self._settings_page.activate(settings_page);target=self._settings_page
+        elif page=='resources':
+            if self._resources_page is None:
+                from ui.performance import ResourcesPage
+                self._resources_page=ResourcesPage(self._events,self);self._resources_page.compare_requested.connect(self._compare_resources);self._pages.addWidget(self._resources_page)
+            target=self._resources_page
         else:
-            page='conversation';self._pages.setCurrentWidget(self._workspace)
-            self._session_layout.insertWidget(0,self._toggle);self._session_host.show();self._history_panel._schedule_follow()
-        self._active_page=page;self._page_title.setText('Learning deck' if page=='deck' else 'Conversation')
-        self._nav_deck.setChecked(page=='deck');self._nav_conversation.setChecked(page=='conversation')
-        self._refresh_status_line()
+            page='conversation';target=self._workspace;self._history_panel._schedule_follow()
+        self._pages.setCurrentWidget(target);self._session_host.setVisible(page=='conversation')
+        self._active_page=page;self._page_title.setText({'conversation':'Conversation','deck':'Learning deck','settings':'Settings','resources':'Resources'}[page])
+        for key,button in (('conversation',self._nav_conversation),('deck',self._nav_deck),('settings',self._nav_settings),('resources',self._nav_resources)):button.setChecked(page==key)
+        self._adapt_workspace();self._refresh_status_line()
+
+    def _adapt_workspace(self):
+        compact=self.width()<900
+        if self._details_view is not None:
+            self._history_panel.setVisible(not compact)
+            button=getattr(self._details_view,'close_button',None)
+            if button is not None:
+                from ui.icons import set_button_icon
+                set_button_icon(button,'back' if compact else 'close');button.setToolTip('Back to conversation' if compact else 'Close sentence details')
+        else:self._history_panel.show()
+
+    def _position_save_notice(self):
+        self._save_notice.adjustSize();self._save_notice.move(max(12,(self.width()-self._save_notice.width())//2),max(12,self.height()-self._save_notice.height()-28))
+
+    def _card_saved(self,item):
+        self._position_save_notice();self._save_notice.show();self._save_notice.raise_();self._notice_timer.start(3000)
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,'_history_panel'):self._adapt_workspace()
+        if hasattr(self,'_save_notice') and self._save_notice.isVisible():self._position_save_notice()
 
     def _refresh_status_line(self):
-        if self._active_page=='deck':
+        if self._active_page!='conversation':
             activity='Listening' if self._toggle.isChecked() else 'Paused'
             device=('Mic: ' if self._config.audio_device_kind=='mic' else 'Desktop: ')+(self._config.audio_device_name or 'Default speakers')
             suffix='' if self._status_message.startswith('Ready.') else ' · '+self._status_message
@@ -310,7 +353,9 @@ class ControlPanel(QWidget):
         else:self._status.setText(self._status_message)
 
     def dispose_learning(self):
+        self._notice_timer.stop();self._save_notice.hide()
         if self._deck_page is not None:self._deck_page.dispose()
+        if self._settings_page is not None:self._settings_page.dispose()
 
     def clear_history(self):
         if self._details_view is not None:

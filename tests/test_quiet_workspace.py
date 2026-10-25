@@ -88,9 +88,9 @@ class WorkspaceTests(unittest.TestCase):
         config=AppConfig();events=EventBus()
         with patch('ui.panel.list_audio_sources',return_value=[]):panel=ControlPanel(config,events)
         config.audio_device_name='HyperX microphone';config.audio_device_kind='mic';events.state_changed.emit(config.snapshot());panel.show();APP.processEvents()
-        self.assertIs(panel._device.parentWidget(),panel._toggle.parentWidget())
+        self.assertTrue(panel._device.isVisibleTo(panel));self.assertEqual(panel._header_layout.indexOf(panel._toggle),3)
         self.assertIn('Mic',panel._device.accessibleName())
-        self.assertIn(config.audio_device_name,panel._device.toolTip())
+        self.assertIn(config.audio_device_name,panel._device.toolTip());self.assertIn(config.audio_device_name,panel._device.currentText())
         panel.mark_quitting();panel.close()
 
     def test_threshold_icon_displays_current_setting_and_opens_audio_settings(self):

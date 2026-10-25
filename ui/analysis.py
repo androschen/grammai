@@ -38,9 +38,9 @@ class SentenceAnalysis(QWidget):
         self.source_text.setMaximumHeight(64)
         self.source_text.setReadOnly(True)
         self.source_text.hide()
-        self.selected_preview=CopyableLabel(study.text.toPlainText());self.selected_preview.setWordWrap(True);self.selected_preview.setStyleSheet('font-size:16px;');self.selected_preview.explain_handler=study.source_display.explain_handler
+        self.selected_preview=CopyableLabel(study.text.toPlainText());self.selected_preview.setWordWrap(True);self.selected_preview.setObjectName('sentenceOriginal');self.selected_preview.explain_handler=study.source_display.explain_handler
         layout.addWidget(self.selected_preview)
-        self.context_heading=QLabel('Conversation context');self.context_heading.setObjectName('field');layout.addWidget(self.context_heading)
+        self.context_heading=QLabel('Earlier dialogue');self.context_heading.setObjectName('field');layout.addWidget(self.context_heading)
         self.context=QPlainTextEdit();self.context.setReadOnly(True);self.context.setMaximumHeight(110)
         self.context.setPlainText('\n\n'.join(item['text'] for item in self._original_context));self.context.setAccessibleName('Earlier original dialogue used for analysis')
         self.context.hide()
@@ -51,7 +51,7 @@ class SentenceAnalysis(QWidget):
         notice.setWordWrap(True)
         layout.addWidget(notice);notice.setVisible(not local)
         row=QHBoxLayout()
-        self.run=QPushButton('Explain' if local else 'Explain online')
+        self.run=QPushButton('Explain' if local else 'Explain online');self.run.setObjectName('primary')
         from ui.icons import icon_button
         self.cancel=icon_button('stop','Cancel explanation',self);self.cancel.hide()
         self.cancel.setEnabled(False);self.cancel.hide()

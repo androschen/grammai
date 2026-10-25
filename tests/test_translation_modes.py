@@ -65,7 +65,7 @@ class TranslationModeTests(unittest.TestCase):
     def test_settings_mode_survives_draft_and_advanced_starts_hidden(self):
         from ui.settings import SettingsDialog
         with patch('ui.settings.list_audio_sources',return_value=[]):dialog=SettingsDialog(AppConfig(),EventBus())
-        dialog._translation_mode.setCurrentIndex(dialog._translation_mode.findData('review'));self.assertEqual(dialog._draft().translation_mode,'review');self.assertEqual(dialog.tabs.tabText(1),'Translation');self.assertEqual(dialog.tabs.tabText(5),'Understanding');dialog.reject()
+        dialog._translation_mode.setCurrentIndex(dialog._translation_mode.findData('review'));self.assertEqual(dialog._draft().translation_mode,'review');self.assertEqual(dialog.tabs.tabText(1),'Languages');self.assertEqual(dialog.tabs.tabText(5),'Understanding');dialog.reject()
     def test_compact_history_keeps_original_pronunciation_and_copyable_translation(self):
         update=SubtitleUpdate('', 'I will buy food first.','original speech',native_phonetics='pronunciation',source_language='zh',target_language='en')
         card=HistoryCard(update);original=card.findChild(QLabel,'originalSpeech');target=card.findChild(QLabel,'target')

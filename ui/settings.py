@@ -1,10 +1,10 @@
 """Organized settings with explicit model changes and live noise-gate preview."""
 from dataclasses import fields, replace
 from pathlib import Path
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal, QSignalBlocker
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QSpinBox, QDoubleSpinBox, QTabWidget, QVBoxLayout, QWidget, QListWidget)
+    QScrollArea, QSpinBox, QDoubleSpinBox, QTabWidget, QVBoxLayout, QWidget, QListWidget, QSizePolicy)
 from audio.capture import list_audio_sources
 from core.config import AppConfig, TargetLanguage, QualityMode, LANGUAGE_LABELS, SOURCE_LANGUAGE_LABELS, QUALITY_LABELS
 from core.events import EventBus
@@ -13,29 +13,31 @@ from ui.performance import LivePerformance, BenchmarkResults
 from ui.theme import style_for
 
 
-class SettingsDialog(QDialog):
-    def __init__(self, config: AppConfig, events: EventBus, parent=None, page=0, replays=None):
+class SettingsContent:
+    def __init__(self, config: AppConfig, events: EventBus, parent=None, page=0, replays=None, embedded=False):
         super().__init__(parent)
         self._config, self._events = config, events
+        self.embedded=embedded;self._active=not embedded;self._disposed=False
+        self.setObjectName('settingsPage');self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
         self._revert_threshold = config.noise_threshold
         self._sources = []
         self.setWindowTitle('GrammAI - Settings')
-        self.setStyleSheet(style_for(config.theme))
-        self.resize(800, 740)
-        self.setMinimumSize(640, 520)
+        if not embedded:
+            self.setStyleSheet(style_for(config.theme));self.resize(800,740);self.setMinimumSize(640,520)
         layout = QVBoxLayout(self)
         title = QLabel('Settings')
         title.setObjectName('title')
-        layout.addWidget(title)
+        if not embedded:layout.addWidget(title)
         subtitle=QLabel('A little tuning. A better listening experience.')
         subtitle.setObjectName('hint')
         subtitle.hide()
-        layout.setContentsMargins(14,14,14,14)
+        layout.setContentsMargins(0,0,0,0) if embedded else layout.setContentsMargins(14,14,14,14)
         layout.setSpacing(8)
         self.tabs = QTabWidget()
         self.categories=QListWidget();self.categories.setObjectName('settingsNavigation');self.categories.setFixedWidth(140);self.categories.setAccessibleName('Settings categories')
         workspace=QHBoxLayout();workspace.setSpacing(12);workspace.addWidget(self.categories);workspace.addWidget(self.tabs,1);layout.addLayout(workspace,1)
-        self.tabs.tabBar().hide()
+        if embedded:self.categories.hide()
+        else:self.tabs.tabBar().hide()
         self._audio_page()
         self._language_page()
         self._appearance_page()
@@ -44,7 +46,7 @@ class SettingsDialog(QDialog):
         storage_layout=self._page("Storage")
         self.storage=StorageWidget(config,events,replays)
         storage_layout.addWidget(self.storage)
-        self.tabs.currentChanged.connect(lambda index:self.storage.set_active(index==4))
+        self.tabs.currentChanged.connect(lambda index:self.storage.set_active(index==4 and (not self.embedded or self._active)))
         self.tabs.setCurrentIndex(page)
         self._analysis_page()
         for index in range(self.tabs.count()):self.categories.addItem(self.tabs.tabText(index))
@@ -58,11 +60,14 @@ class SettingsDialog(QDialog):
         if self.analysis_settings.service:
             self.analysis_settings.service.status_changed.connect(self._analysis_status)
             self.analysis_settings.service.progress_changed.connect(self._analysis_progress)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.apply)
-        layout.addWidget(buttons)
+        if embedded:
+            row=QHBoxLayout();row.addStretch()
+            self.discard=QPushButton('Discard changes');self.discard.clicked.connect(self.reject);row.addWidget(self.discard)
+            self.save_changes=QPushButton('Save changes');self.save_changes.setObjectName('primary');self.save_changes.clicked.connect(self.apply);row.addWidget(self.save_changes);layout.addLayout(row)
+        else:
+            buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Apply|QDialogButtonBox.StandardButton.Cancel)
+            buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject)
+            buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.apply);layout.addWidget(buttons)
         self._load_values()
         events.metrics_changed.connect(self._model_metrics)
         history=events.property("resource_history") or ()
@@ -76,11 +81,13 @@ class SettingsDialog(QDialog):
     def _page(self, title):
         body = QWidget()
         layout = QVBoxLayout(body)
-        layout.setSpacing(8)
+        layout.setSpacing(12);layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        body.setMaximumWidth(760)
+        host=QWidget();center=QHBoxLayout(host);center.setContentsMargins(0,0,0,0);center.addStretch();center.addWidget(body,1,Qt.AlignmentFlag.AlignTop);center.addStretch()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(body)
+        scroll.setWidget(host)
         self.tabs.addTab(scroll, title)
         return layout
 
@@ -98,6 +105,7 @@ class SettingsDialog(QDialog):
         form.addRow('Listen to', self._device)
         layout.addLayout(form)
         self._gate = NoiseGateEditor(self, round(self._config.noise_threshold * 100))
+        self._gate.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Maximum)
         self._gate.threshold_changed.connect(self._preview_gate)
         layout.addWidget(self._gate)
         self._speech_detection=QCheckBox('Use speech-aware boundaries (recommended)')
@@ -131,7 +139,7 @@ class SettingsDialog(QDialog):
         layout.addStretch()
 
     def _language_page(self):
-        layout = self._page('Translation')
+        layout = self._page('Languages')
         self._source, self._target = QComboBox(), QComboBox()
         for code, name in SOURCE_LANGUAGE_LABELS.items():
             self._source.addItem(name, code)
@@ -227,11 +235,11 @@ class SettingsDialog(QDialog):
 
     def _performance_page(self):
         outer = self._page('Models')
-        subpages = QTabWidget()
+        subpages = QTabWidget();self.model_tabs=subpages
         outer.addWidget(subpages)
         configuration = QWidget()
         layout = QVBoxLayout(configuration)
-        subpages.addTab(configuration, 'Models')
+        subpages.addTab(configuration,'Configuration' if self.embedded else 'Models')
         self._quality = QComboBox()
         for mode,label in QUALITY_LABELS.items():
             self._quality.addItem(label,mode.value)
@@ -249,15 +257,14 @@ class SettingsDialog(QDialog):
         self._preset_help.setObjectName('hint')
         self._quality.currentIndexChanged.connect(self._describe_preset)
         form = QFormLayout()
-        form.addRow('Quality preset',self._quality)
-        form.addRow('Speech recognition backend',self._backend)
+        form.addRow('Speech recognition',self._backend)
         form.addRow('Translation',self._translation_mode)
         self._selected_models=QLabel();self._selected_models.setWordWrap(True)
         self._selected_models.setTextFormat(Qt.TextFormat.PlainText)
         self._runtime_models=QLabel('Running: waiting for live status')
         self._runtime_models.setWordWrap(True)
         self._runtime_models.setTextFormat(Qt.TextFormat.PlainText)
-        advanced_form=QFormLayout()
+        advanced_form=QFormLayout();advanced_form.addRow('Quality preset',self._quality)
         advanced_form.addRow('Speech CPU threads',self._threads)
         advanced_form.addRow('Translation CPU threads',self._mt_threads)
         self._gpu_setup = QWidget()
@@ -270,6 +277,7 @@ class SettingsDialog(QDialog):
         self._exe.textChanged.connect(self._backend_visibility)
         self._gpu_model.textChanged.connect(self._backend_visibility)
         layout.addLayout(form)
+        self._selected_models.setObjectName('contextPreview');self._runtime_models.setObjectName('contextPreview')
         layout.addWidget(self._selected_models)
         layout.addWidget(self._runtime_models)
         layout.addWidget(self._preset_help)
@@ -296,7 +304,7 @@ class SettingsDialog(QDialog):
             else:
                 self._feedback.setText('GPU speech assets are not installed. See the local speech setup instructions in README.')
         installed.clicked.connect(select_installed)
-        layout.insertWidget(1,installed)
+        layout.insertWidget(1,installed,0,Qt.AlignmentFlag.AlignLeft)
         self._translation_mode.currentIndexChanged.connect(self._describe_preset)
         layout.addStretch()
         monitor = QWidget()
@@ -307,7 +315,8 @@ class SettingsDialog(QDialog):
         explanation.setObjectName('hint')
         monitor_layout.addWidget(explanation)
         monitor_layout.addStretch()
-        subpages.addTab(monitor, 'Live monitor')
+        subpages.addTab(monitor,'Live monitor')
+        if self.embedded:subpages.setTabVisible(1,False)
         comparison = QWidget()
         layout = QVBoxLayout(comparison)
         subpages.addTab(comparison, 'Compare')
@@ -381,7 +390,7 @@ class SettingsDialog(QDialog):
             'accurate': 'Best quality: small speech model and deeper decoding. Uses more processing time.'}
         self._preset_help.setText(descriptions.get(self._quality.currentData(),''))
 
-    def _draft(self):
+    def _draft(self,validate=True):
         c = replace(self._config)
         c.audio_device_id = self._device.currentData() or ''
         source = next((s for s in self._sources if s.device_id == c.audio_device_id),None)
@@ -401,9 +410,10 @@ class SettingsDialog(QDialog):
         c.backend = self._backend.currentData()
         c.cpu_threads, c.translation_threads = self._threads.value(),self._mt_threads.value()
         c.vulkan_executable,c.vulkan_model = self._exe.text().strip(),self._gpu_model.text().strip()
+        c.saved_audio_limit_mb=self.storage.audio_limit.currentData() or 250
         self.appearance.apply_to(c)
         self.analysis_settings.apply_to(c)
-        if c.backend == 'vulkan' and (not Path(c.vulkan_executable).is_file() or not Path(c.vulkan_model).is_file()):
+        if validate and c.backend == 'vulkan' and (not Path(c.vulkan_executable).is_file() or not Path(c.vulkan_model).is_file()):
             raise ValueError('Select an existing Vulkan whisper-server executable and GGML model first, or choose CPU.')
         return c
 
@@ -416,12 +426,12 @@ class SettingsDialog(QDialog):
             return False
         for field in fields(c):
             setattr(self._config,field.name,getattr(c,field.name))
-        self.setStyleSheet(style_for(c.theme))
+        if not self.embedded:self.setStyleSheet(style_for(c.theme))
         self._revert_threshold = c.noise_threshold
         self.appearance.restore()
         self._events.state_changed.emit(c.snapshot())
         self._events.overlay_toggled.emit(c.show_overlay)
-        self._feedback.setText('Applied. Preferences are saved automatically.')
+        self._feedback.setText('Saved. Changes are active.')
         return True
 
     def accept(self):
@@ -458,7 +468,9 @@ class SettingsDialog(QDialog):
         if not busy:
             self._bench_status.setText('Finished. Results are separate from live-session measurements.')
 
-    def done(self,result):
+    def dispose(self):
+        if self._disposed:return
+        self._disposed=True
         self.appearance.restore()
         if self.analysis_settings.service:
             self.analysis_settings.service.status_changed.disconnect(self._analysis_status)
@@ -474,4 +486,70 @@ class SettingsDialog(QDialog):
                 signal.disconnect(slot)
             except (TypeError,RuntimeError):
                 pass
-        super().done(result)
+
+
+
+class SettingsDialog(SettingsContent,QDialog):
+    def done(self,result):
+        self.dispose();super().done(result)
+
+
+class SettingsPage(SettingsContent,QWidget):
+    reset_requested=Signal(int)
+
+    def __init__(self,config,events,parent=None,page=0,replays=None):
+        self._gate_dirty=False
+        super().__init__(config,events,parent,page,replays,embedded=True)
+        self._baseline=SettingsContent._draft(self,validate=False)
+        self._feedback.setText('Save changes to apply. Audio and subtitle previews revert when you leave Settings.')
+
+    def _draft(self,validate=True):
+        draft=SettingsContent._draft(self,validate=False)
+        baseline=getattr(self,'_baseline',draft)
+        merged=replace(self._config)
+        for field in fields(draft):
+            if getattr(draft,field.name)!=getattr(baseline,field.name):setattr(merged,field.name,getattr(draft,field.name))
+        if self._gate_dirty:merged.noise_threshold=self._gate.meter.threshold/100
+        if validate and merged.backend=='vulkan' and (not Path(merged.vulkan_executable).is_file() or not Path(merged.vulkan_model).is_file()):
+            raise ValueError('Choose existing GPU speech files in Models, or choose CPU.')
+        return merged
+
+    def _preview_gate(self,percent):
+        self._gate_dirty=True
+        if self._active:super()._preview_gate(percent)
+
+    def apply(self):
+        if not super().apply():return False
+        self._gate_dirty=False;self._baseline=SettingsContent._draft(self,validate=False)
+        return True
+
+    def activate(self,page=None):
+        self._active=True;self._revert_threshold=self._config.noise_threshold
+        # Refresh externally changed controls only when the user has no draft for them.
+        for name,widget in (('audio_device_id',self._device),('source_language',self._source),('target_language',self._target),('theme',self._theme)):
+            current=widget.currentData();base=getattr(self._baseline,name);base=getattr(base,'value',base)
+            if current==base:
+                value=getattr(self._config,name);value=getattr(value,'value',value)
+                with QSignalBlocker(widget):
+                    index=widget.findData(value)
+                    if index<0 and name=='audio_device_id':widget.addItem(self._config.audio_device_name or 'Selected device (unavailable)',value);index=widget.count()-1
+                    widget.setCurrentIndex(max(0,index))
+                setattr(self._baseline,name,getattr(self._config,name))
+        if not self._gate_dirty:self._gate.set_threshold(round(self._config.noise_threshold*100))
+        if page is not None:self.tabs.setCurrentIndex(page)
+        self.storage.set_active(self.tabs.currentIndex()==4)
+
+    def suspend(self):
+        self._active=False;self.storage.set_active(False);self.appearance.restore()
+        if self._gate_dirty:
+            self._config.noise_threshold=self._revert_threshold;self._events.state_changed.emit(self._config.snapshot())
+
+    def reject(self):
+        self.suspend();self.reset_requested.emit(self.tabs.currentIndex())
+
+    def accept(self):
+        self.apply()
+
+    def dispose(self):
+        if self._disposed:return
+        self.suspend();super().dispose()

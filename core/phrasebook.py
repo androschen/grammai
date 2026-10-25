@@ -1,9 +1,10 @@
-"""Opt-in, text-only phrasebook with a hard serialized-size quota."""
+"""Opt-in, phrasebook with a hard serialized-size quota."""
 from datetime import datetime,timezone
 import json
 from uuid import uuid4
 from core.preferences import write_json,data_dir
 import logging
+from audio.library import audio_transaction
 
 MAX_PHRASES=1000
 MAX_BYTES=2*1024*1024
@@ -37,7 +38,8 @@ class Phrasebook:
             self._cache=items;self._cache_key=key
         return [dict(x) for x in self._cache]
 
-    def save(self,update,notes='',reviewed=False):
+    @audio_transaction
+    def save(self,update,notes='',reviewed=False,audio=None):
         fields={'native_text':update.native_text,'target_text':update.target_text,
                 'phonetics':update.phonetics,'native_phonetics':update.native_phonetics,
                 'source_language':update.source_language,'target_language':update.target_language,
@@ -45,7 +47,7 @@ class Phrasebook:
         if any(len(value)>4000 for value in fields.values()):
             raise ValueError('Each text field must be at most 4,000 characters.')
         items=self.items()
-        existing=next((i for i,item in enumerate(items) if item.get('card_type')!='vocabulary' and all(item.get(k)==fields[k] for k in ('native_text','target_text','source_language','target_language'))),None)
+        existing=next((i for i,item in enumerate(items) if item.get('card_type') not in ('vocabulary','reply') and all(item.get(k)==fields[k] for k in ('native_text','target_text','source_language','target_language'))),None)
         if existing is not None:
             item=dict(items[existing],**dict(fields,notes=fields['notes'] or items[existing].get('notes','')))
             items[existing]=item
@@ -57,10 +59,12 @@ class Phrasebook:
         if reviewed:
             item['reviewed_by_user']=True
             item['reviewed_at']=datetime.now(timezone.utc).isoformat()
+        self._attach_audio(item,audio)
         self._write(items)
         return item
 
-    def save_vocabulary(self,payload,value,meaning,notes='',target_language='id',reviewed=False):
+    @audio_transaction
+    def save_vocabulary(self,payload,value,meaning,notes='',target_language='id',reviewed=False,audio=None):
         """Persist a reviewed expression with its real dialogue, never a generated example."""
         from ml.phrase_explanation import explanation_input
         from ml.phonetics import phonetics_auto
@@ -93,8 +97,58 @@ class Phrasebook:
             item.pop('due_at',None);item.pop('interval_days',None)
         if not notes:fields['notes']=item.get('notes','')
         item.update(fields,reviewed_by_user=True,reviewed_at=datetime.now(timezone.utc).isoformat())
+        self._attach_audio(item,audio)
         self._write(items)
         return dict(item)
+
+    @audio_transaction
+    def save_reply(self,payload,reply,meaning,notes='',target_language='id',reviewed=False):
+        from ml.reply_suggestions import reply_input
+        from ml.phonetics import phonetics_auto
+        checked=reply_input(payload)
+        if not reviewed:raise ValueError('Check the reply and meaning before saving.')
+        text=reply.get('text','');meaning=meaning.strip();notes=notes.strip()
+        if not isinstance(text,str) or not 0<len(text.strip())<=180 or not meaning or target_language not in ('id','en','zh','th') or any(len(x)>4000 for x in (meaning,notes)):
+            raise ValueError('A short reply and a checked meaning are required.')
+        fields=dict(card_type='reply',generated_by='local_ai',native_text=text.strip(),target_text=meaning,
+            native_phonetics=phonetics_auto(text),phonetics=phonetics_auto(meaning),source_language=checked['language'],
+            target_language=target_language,notes=notes,reply_question=checked['text'],reply_label=str(reply.get('label',''))[:70],
+            conversation_context=checked['context'])
+        items=self.items();identity=('native_text','source_language','target_language','reply_question')
+        item=next((x for x in items if x.get('card_type')=='reply' and all(x.get(k)==fields[k] for k in identity)),None)
+        if item is None:
+            item=dict(id=uuid4().hex,saved_at=datetime.now(timezone.utc).isoformat());items.append(item)
+        elif item.get('target_text')!=meaning:
+            item.pop('due_at',None);item.pop('interval_days',None);item.pop('learning_explanation',None)
+        if not notes:fields['notes']=item.get('notes','')
+        item.update(fields,reviewed_by_user=True,reviewed_at=datetime.now(timezone.utc).isoformat())
+        # A generated reply has no original recording; the heard question is separate context.
+        item.pop('audio',None)
+        self._write(items)
+        return dict(item)
+
+    def _attach_audio(self,item,audio):
+        if audio is None:return
+        from audio.library import AudioLibrary
+        if not isinstance(audio,dict) or not AudioLibrary().available({'audio':audio}):
+            raise ValueError('Original audio could not be saved. Try again or save text only.')
+        item['audio']=dict(audio)
+
+    @audio_transaction
+    def remove_audio(self,identifier):
+        items=self.items();item=next((x for x in items if x['id']==identifier),None)
+        if item is None:raise ValueError('This card was deleted.')
+        previous=item.pop('audio',None)
+        self._write(items)
+        self._release_audio(previous,items)
+
+    def _release_audio(self,metadata,items):
+        if not metadata:return
+        name=metadata.get('file')
+        if any((x.get('audio') or {}).get('file')==name for x in items):return
+        from audio.library import AudioLibrary
+        try:AudioLibrary().path(name).unlink(missing_ok=True)
+        except (ValueError,OSError):logging.warning('Unused audio retained for explicit Storage cleanup.')
 
     def _write(self,items):
         if len(items)>MAX_PHRASES:
@@ -165,11 +219,16 @@ class Phrasebook:
             if due<=now:result.append(item)
         return result
 
+    @audio_transaction
     def delete(self,identifier):
-        write_json('phrases.json',[x for x in self.items() if x['id']!=identifier])
+        items=self.items();old=next((x.get('audio') for x in items if x['id']==identifier),None)
+        remaining=[x for x in items if x['id']!=identifier]
+        self._write(remaining);self._release_audio(old,remaining)
 
+    @audio_transaction
     def clear(self):
-        write_json('phrases.json',[])
+        items=self.items();self._write([])
+        for item in items:self._release_audio(item.get('audio'),[])
 
     def stats(self):
         path=data_dir()/'phrases.json'

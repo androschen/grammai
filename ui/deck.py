@@ -1,13 +1,14 @@
-"""Compact text-only vocabulary and sentence deck; no model calls."""
+"""Compact vocabulary and sentence deck with optional original audio."""
 from html import escape
 import logging
 LOGGER=logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 from PySide6.QtCore import Qt,QSize,QTimer
-from PySide6.QtGui import QTextDocument,QAbstractTextDocumentLayout,QPalette
+from PySide6.QtGui import QTextDocument,QAbstractTextDocumentLayout,QPalette,QColor,QPen,QPainter
 from PySide6.QtWidgets import (QDialog,QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
     QLineEdit,QComboBox,QListWidget,QListWidgetItem,QTabWidget,QStyledItemDelegate,QStyle,QStyleOptionViewItem,
-    QFrame,QScrollArea,QSizePolicy,QSplitter)
+    QFrame,QScrollArea,QSizePolicy,QSplitter,QProgressBar)
+from core.card_time import saved_time
 from core.phrasebook import DeckReadError
 from core.preferences import data_dir
 from core.learning_cards import vocabulary_card,practice_prompt,answer_text,card_search_text
@@ -28,44 +29,55 @@ class CardRowDelegate(QStyledItemDelegate):
     """Paint visible rows, rather than allocating hundreds of nested widgets."""
     def document(self,index,width,palette):
         item=index.data(Qt.ItemDataRole.UserRole) or {}
+        from ui.learning_style import learning_palette
+        colors=learning_palette(self.parent())
         badge=BADGES.get(item.get('source_language'),'?')
-        due=' · Due' if item.get('_due') else ''
-        if item.get('reviewed_by_user') is not True:due=' · Needs review'
+        status='Due today' if item.get('_due') else 'Scheduled'
+        if item.get('reviewed_by_user') is not True:status='Needs review'
+        if item.get('card_type')=='reply':status+=' · AI'
+        if item.get('audio'):status+=' · ♪'
+        status+=' · '+saved_time(item.get('saved_at'))[0]
         first=escape(item.get('native_text','')[:100]);pronunciation=escape(item.get('native_phonetics','')[:100])
-        lines=[f'<b>{badge} · {first}</b>{due}']
-        if pronunciation:lines.append(pronunciation)
+        language_color=colors.get(item.get('source_language'),colors['muted'])
+        lines=[f'<span style="color:{language_color};font-size:11px">{badge}</span> &nbsp; <span style="color:{colors['green'] if item.get('_due') else colors['muted']};font-size:11px">{status}</span>',f'<span style="font-size:18px;font-weight:600">{first}</span>']
+        if pronunciation:lines.append(f'<span style="color:{colors["muted"]};font-size:12px">{pronunciation}</span>')
         lines.append(escape(item.get('target_text','')[:150]))
         doc=QTextDocument();doc.setDocumentMargin(0);doc.setDefaultFont(self.parent().font())
-        doc.setDefaultStyleSheet('body { color: '+palette.color(QPalette.ColorRole.Text).name()+'; }')
-        doc.setHtml('<body>'+'<br>'.join(lines)+'</body>');doc.setTextWidth(max(80,width-24))
+        doc.setDefaultStyleSheet('body { color: '+colors['ink']+'; }')
+        doc.setHtml('<body>'+'<br>'.join(lines)+'</body>');doc.setTextWidth(max(60,width-32))
         return doc
 
     def paint(self,painter,option,index):
         opt=QStyleOptionViewItem(option);self.initStyleOption(opt,index);opt.text=''
-        style=opt.widget.style() if opt.widget else self.parent().style()
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem,opt,painter,opt.widget)
+        from ui.learning_style import learning_palette
+        colors=learning_palette(self.parent());selected=bool(opt.state & QStyle.StateFlag.State_Selected)
+        painter.save();painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(colors['wash' if selected else 'surface']))
+        painter.setPen(QPen(QColor(colors['accent' if selected else 'line']),1))
+        painter.drawRoundedRect(opt.rect.adjusted(1,2,-2,-5),10,10);painter.restore()
         doc=self.document(index,opt.rect.width(),opt.palette)
-        painter.save();painter.setClipRect(opt.rect);painter.translate(opt.rect.left()+10,opt.rect.top()+10)
+        painter.save();painter.setClipRect(opt.rect);painter.translate(opt.rect.left()+14,opt.rect.top()+12)
         context=QAbstractTextDocumentLayout.PaintContext();context.palette=opt.palette
         doc.documentLayout().draw(painter,context);painter.restore()
 
     def sizeHint(self,option,index):
         width=self.parent().viewport().width()
         doc=self.document(index,width,option.palette)
-        return QSize(max(100,width),int(doc.size().height())+22)
+        return QSize(max(100,width),int(doc.size().height())+28)
 
 
 class LearningDeckContent:
     def __init__(self,config,phrasebook,parent=None,events=None,service=None,embedded=False):
         super().__init__(parent)
         self.config,self.events,self.service=config,events,service
+        self.setObjectName('learningDeck');self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
         self.embedded=embedded;self.disposed=False;self._compact=None;self._detail_open=False
         self._loaded_card_id=None;self._loaded_item={};self._drafts={};self._loaded_stamp=None
         self.book=phrasebook;self.items=[];self.loading=False;self.queue=[];self.index=0;self.revealed=False;self.started=False;self.session_results=[]
         self.setWindowTitle('Learning deck')
         if not embedded:self.setStyleSheet(style_for(config.theme));self.resize(700,650)
         outer=QVBoxLayout(self);outer.setContentsMargins(0,0,0,0) if embedded else outer.setContentsMargins(16,14,16,14);outer.setSpacing(8)
-        header=QHBoxLayout();title=QLabel('Learning deck');title.setObjectName('field');header.addWidget(title);header.addStretch()
+        header=QHBoxLayout();title=QLabel('Your learning deck');title.setObjectName('learningTitle');header.addWidget(title);header.addStretch()
         self.summary=QLabel();self.summary.setObjectName('hint');header.addWidget(self.summary)
         from ui.icons import icon_button
         close=icon_button('close','Close learning deck',self);close.clicked.connect(lambda:self.accept() if not embedded else None);header.addWidget(close)
@@ -73,16 +85,16 @@ class LearningDeckContent:
         else:close.hide();title.hide()
         self.tabs=QTabWidget();outer.addWidget(self.tabs,1)
         if embedded:self.tabs.setCornerWidget(self.summary)
-        self.cards_page=QWidget();cards_layout=QVBoxLayout(self.cards_page);cards_layout.setContentsMargins(0,4,0,0)
+        self.cards_page=QWidget();cards_layout=QVBoxLayout(self.cards_page);cards_layout.setContentsMargins(0,8,0,0)
         self.browser=QWidget();browse=QVBoxLayout(self.browser);browse.setContentsMargins(0,0,0,0)
-        self.cards_split=QSplitter(Qt.Orientation.Horizontal);self.cards_split.setChildrenCollapsible(False);self.cards_split.addWidget(self.browser)
+        self.cards_split=QSplitter(Qt.Orientation.Horizontal);self.cards_split.setChildrenCollapsible(False);self.cards_split.setHandleWidth(18);self.cards_split.addWidget(self.browser)
         cards_layout.addWidget(self.cards_split);self.tabs.addTab(self.cards_page,'Cards')
-        filters=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('Search expressions, meanings or notes');self.search.setClearButtonEnabled(True)
+        filters=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('Search expressions or notes');self.search.setClearButtonEnabled(True)
         self.language=language_combo();self.language.setMinimumContentsLength(7);self.language.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        filters.addWidget(self.search,1);filters.addWidget(self.language);browse.addLayout(filters)
-        actions=QHBoxLayout();self.start=QPushButton('Practice');self.start.clicked.connect(self.practice_selected_language);actions.addWidget(self.start);actions.addStretch()
+        browse.addWidget(self.search);filters.addWidget(self.language,1);browse.addLayout(filters)
+        actions=QHBoxLayout();self.start=QPushButton('Practice');self.start.setObjectName('learningPrimary');self.start.clicked.connect(self.practice_selected_language);actions.addWidget(self.start);actions.addStretch()
         self.open_card=icon_button('edit','Open selected learning card',self);actions.addWidget(self.open_card);browse.addLayout(actions)
-        self.list=QListWidget();self.list.setObjectName('learningCards');self.list.setWordWrap(True)
+        self.list=QListWidget();self.list.setObjectName('learningCards');self.list.setWordWrap(True);self.list.setSpacing(2)
         self.list.setItemDelegate(CardRowDelegate(self.list));self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.setResizeMode(QListWidget.ResizeMode.Adjust);browse.addWidget(self.list,1)
         self.empty=QLabel('No matching cards. Select an expression in a conversation to create one.');self.empty.setWordWrap(True);self.empty.setObjectName('hint');browse.addWidget(self.empty)
@@ -99,44 +111,57 @@ class LearningDeckContent:
         self.original.textChanged.connect(self.changed);self.meaning.textChanged.connect(self.changed)
         self.notes.textChanged.connect(self._save_enabled);self.checked.toggled.connect(self._save_enabled)
         self.editor.edit_mode_changed.connect(self._save_enabled)
+        self.editor.audio.remove_requested.connect(self.remove_audio)
         self.save.clicked.connect(self.save_card);self.delete.clicked.connect(self.delete_card)
         self.open_card.clicked.connect(self.edit_selected);self.list.itemClicked.connect(lambda item:self.edit_selected())
         self.list.itemActivated.connect(lambda item:self.edit_selected());self.list.currentRowChanged.connect(self.select)
         self.search.textChanged.connect(self.reload);self.language.currentIndexChanged.connect(self.reload)
-        practice=QWidget();review=QVBoxLayout(practice);review.setSpacing(10);self.tabs.addTab(practice,'Practice')
+        practice=QWidget();practice_outer=QVBoxLayout(practice);practice_outer.setContentsMargins(0,4,0,0)
+        practice_center=QWidget();self.practice_center=practice_center;practice_center.setMaximumWidth(680);practice_center.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding);practice_outer.addWidget(practice_center,1,Qt.AlignmentFlag.AlignHCenter)
+        review=QVBoxLayout(practice_center);review.setSpacing(10);review.setContentsMargins(8,0,8,0);self.tabs.addTab(practice,'Practice')
         controls=QHBoxLayout();self.practice_language=language_combo();self.mode=QComboBox()
         self.mode.addItem('Understand meaning','understand');self.mode.addItem('Recall expression','recall');self.mode.setAccessibleName('Practice mode')
         self.mode.setToolTip('Recall hides the expression in its example. Sentence cards use meaning → original.')
         self.practice_start=QPushButton('Practice due cards');self.practice_start.clicked.connect(self.start_review)
         controls.addWidget(self.practice_language,1);controls.addWidget(self.mode,1);controls.addWidget(self.practice_start);review.addLayout(controls)
         self.practice_instruction=QLabel();self.practice_instruction.setWordWrap(True);review.addWidget(self.practice_instruction)
-        self.progress=QLabel();self.progress.setWordWrap(True);self.progress.setObjectName('hint');review.addWidget(self.progress)
+        progress_row=QHBoxLayout();self.progress=QLabel();self.progress.setWordWrap(True);self.progress.setObjectName('hint');progress_row.addWidget(self.progress,1)
+        self.skip=QPushButton('Skip');self.skip.setToolTip('Leave this card due; do not change its schedule.');self.skip.clicked.connect(self.skip_card);progress_row.addWidget(self.skip);review.addLayout(progress_row)
+        self.progress_bar=QProgressBar();self.progress_bar.setObjectName('learningProgress');self.progress_bar.setTextVisible(False);self.progress_bar.setFixedHeight(5);self.progress_bar.setAccessibleName('Cards completed in this practice session');review.addWidget(self.progress_bar)
         reading_scroll=QScrollArea();reading_scroll.setWidgetResizable(True);reading_scroll.setFrameShape(QFrame.Shape.NoFrame)
         reading_body=QWidget();reading_body_layout=QVBoxLayout(reading_body);reading_body_layout.setContentsMargins(0,0,0,0)
-        self.practice_frame=QFrame();self.practice_frame.setObjectName('sentenceReadingSection')
+        self.practice_frame=QFrame();self.practice_frame.setObjectName('learningPractice')
         self.practice_frame.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Maximum)
         reading=QVBoxLayout(self.practice_frame);reading.setContentsMargins(18,16,18,16);reading.setSpacing(10)
         reading_body_layout.addWidget(self.practice_frame);reading_body_layout.addStretch()
         reading_scroll.setWidget(reading_body);review.addWidget(reading_scroll,1)
-        self.focus_expression=CopyableLabel();self.focus_expression.setWordWrap(True);reading.addWidget(self.focus_expression)
-        self.front=CopyableLabel();self.front.setStyleSheet('font-size:21px;');self.front.setWordWrap(True);reading.addWidget(self.front)
+        self.focus_expression=CopyableLabel();self.focus_expression.setObjectName('learningPronunciation');self.focus_expression.setWordWrap(True);reading.addWidget(self.focus_expression)
+        self.front=CopyableLabel();self.front.setObjectName('learningPrompt');self.front.setWordWrap(True);reading.addWidget(self.front)
         self.hint=CopyableLabel();self.hint.setWordWrap(True);reading.addWidget(self.hint)
-        self.reveal=QPushButton('Reveal answer');self.reveal.clicked.connect(self.reveal_answer);reading.addWidget(self.reveal)
+        from ui.card_audio import AudioTransport
+        self.practice_audio=AudioTransport(events,self);reading.addWidget(self.practice_audio)
+        from ui.pronunciation import ListenWidget
+        self.practice_listen=ListenWidget(events,self);reading.addWidget(self.practice_listen)
+        self.reveal=QPushButton('Reveal meaning');self.reveal.setObjectName('learningPrimary');self.reveal.clicked.connect(self.reveal_answer);reading.addWidget(self.reveal)
         self.answer=QWidget();answer=QVBoxLayout(self.answer);answer.setContentsMargins(0,12,0,6)
         self.pronunciation=CopyableLabel();self.back=CopyableLabel();self.practice_usage=CopyableLabel();self.practice_notes=CopyableLabel();self.practice_context=CopyableLabel()
+        self.pronunciation.setObjectName('learningPronunciation');self.back.setObjectName('learningAnswer');self.practice_notes.setObjectName('learningNotes')
         for label in (self.pronunciation,self.back,self.practice_usage,self.practice_notes,self.practice_context):label.setWordWrap(True);answer.addWidget(label)
         from ui.card_explanation import CardExplanationWidget
         self.practice_explanation=CardExplanationWidget(config,events,service,self)
         answer.addWidget(self.practice_explanation)
         reading.addWidget(self.answer);self.answer.hide()
-        grade=QHBoxLayout();self.again=QPushButton('Again · 10 min');self.remembered=QPushButton('Remembered')
+        grade=QHBoxLayout();self.again=QPushButton('Again · 10 min');self.remembered=QPushButton('Remembered');self.remembered.setObjectName('learningPrimary')
         self.again.clicked.connect(lambda:self.grade(False));self.remembered.clicked.connect(lambda:self.grade(True))
         grade.addWidget(self.again);grade.addWidget(self.remembered);review.addLayout(grade)
-        self.skip=QPushButton('Skip');self.skip.setToolTip('Leave this card due; do not change its schedule.')
-        self.skip.clicked.connect(self.skip_card);grade.addWidget(self.skip)
+        self.practice_feedback=QLabel();self.practice_feedback.setObjectName('hint');self.practice_feedback.setWordWrap(True);self.practice_feedback.setAccessibleName('Last practice result');review.addWidget(self.practice_feedback);self.practice_feedback.hide()
         self.mode.currentIndexChanged.connect(self.show_card);self.practice_language.currentIndexChanged.connect(self._reset_practice)
-        self.tabs.currentChanged.connect(lambda index:self.refresh_if_changed() if index==0 else None)
+        self.tabs.currentChanged.connect(self._tab_changed)
+        if events is not None:events.card_saved.connect(self._card_saved)
         self.reload();self.show_card()
+
+    def _card_saved(self,item):
+        if not self.disposed and self.isVisible():self.refresh_if_changed()
 
     def _save_enabled(self,*args):
         index=self.list.currentRow()
@@ -166,11 +191,11 @@ class LearningDeckContent:
         self.loading=True;self.list.clear()
         for item in self.items:
             row=QListWidgetItem(item.get('native_text',''))
-            row.setData(Qt.ItemDataRole.UserRole,dict(item,_due=item['id'] in due_ids));row.setToolTip('Open card · inspect context, edit meaning and notes')
+            row.setData(Qt.ItemDataRole.UserRole,dict(item,_due=item['id'] in due_ids));row.setToolTip('Open card · inspect context, edit meaning and notes\nSaved: '+saved_time(item.get('saved_at'))[1]);row.setData(Qt.ItemDataRole.AccessibleDescriptionRole,'Saved '+saved_time(item.get('saved_at'))[0])
             self.list.addItem(row)
         self.loading=False
         self.summary.setText(f'{len(all_items)} saved · {len(due)} due')
-        self.summary.setToolTip(f"Saved file: {data_dir()/'phrases.json'}\nText only · {stats['bytes']/1024:.1f} KB / 2 MB · 1,000-card limit")
+        self.summary.setToolTip(f"Saved file: {data_dir()/'phrases.json'}\nCard text · {stats['bytes']/1024:.1f} KB / 2 MB · 1,000-card limit")
         filtered_due=sum(not language or x.get('source_language')==language for x in due)
         self.start.setText(f'Practice {min(10,filtered_due)} due cards');self.start.setEnabled(filtered_due>0)
         self.empty.setVisible(not self.items)
@@ -242,6 +267,30 @@ class LearningDeckContent:
             self.reload();self.editor.feedback.setText('Saved')
         except (ValueError,OSError) as exc:self.editor.feedback.setText(str(exc))
 
+    def _tab_changed(self,index):
+        self.editor.audio.stop();self.practice_audio.stop();self.editor.listen.stop();self.practice_listen.stop()
+        if index==0:self.refresh_if_changed()
+
+    def suspend(self):
+        self.editor.audio.stop();self.practice_audio.stop();self.editor.listen.stop();self.practice_listen.stop()
+
+    def hideEvent(self,event):
+        self.suspend();super().hideEvent(event)
+
+    def remove_audio(self):
+        index=self.list.currentRow()
+        if not 0<=index<len(self.items):return
+        from PySide6.QtWidgets import QMessageBox
+        if QMessageBox.question(self,'Remove recording?','Remove audio from this card? Text, notes and its review schedule stay. Other cards sharing the recording keep their audio.')!=QMessageBox.StandardButton.Yes:return
+        try:
+            identifier=self.items[index]['id'];self.editor.audio.stop();self.practice_audio.stop();self.editor.listen.stop();self.practice_listen.stop()
+            self.book.remove_audio(identifier)
+            for card in self.queue:
+                if card.get('id')==identifier:card.pop('audio',None)
+            self.reload();self.editor.feedback.setText('Recording removed; text and notes kept.')
+            if self.index<len(self.queue):self.practice_audio.bind(self.queue[self.index],locked=self.mode.currentData()=='recall' and not self.revealed)
+        except (ValueError,OSError) as exc:self.editor.feedback.setText(str(exc))
+
     def delete_card(self):
         index=self.list.currentRow()
         if 0<=index<len(self.items):
@@ -265,11 +314,14 @@ class LearningDeckContent:
 
     def show_card(self,*args):
         self.practice_explanation.set_data(None,None)
+        self.practice_feedback.clear();self.practice_feedback.hide()
         self.revealed=False;self.answer.hide();self.again.setEnabled(False);self.remembered.setEnabled(False)
         self.again.hide();self.remembered.hide()
         active=self.index<len(self.queue);self.practice_frame.setVisible(active);self.reveal.setEnabled(active);self.reveal.setVisible(active)
         item=self.queue[self.index] if active else {}
         recall=self.mode.currentData()=='recall'
+        self.practice_audio.bind(item,locked=recall)
+        self.practice_listen.bind(item.get('native_text',''),item.get('source_language',''),locked=recall)
         self.practice_instruction.setText('Recall the missing expression before revealing. Pronunciation appears with the answer.' if recall else 'Recall the expression’s meaning in this sentence before revealing.')
         self.focus_expression.setText('Expression: '+item.get('native_text',''))
         self.focus_expression.setVisible(active and vocabulary_card(item) and not recall)
@@ -284,16 +336,20 @@ class LearningDeckContent:
             message=f'Session complete · {remembered} remembered · {again} to revisit · {skipped} skipped'
             self.practice_instruction.setText('Your review schedule is saved. Skipped cards stay due.')
         badge=BADGES.get(item.get('source_language'),'?')
-        self.progress.setText(f'{self.index+1} / {len(self.queue)} · {badge}' if active else message)
+        self.progress.setText(f'Card {self.index+1} of {len(self.queue)} · {badge}' if active else message)
+        self.progress_bar.setRange(0,max(1,len(self.queue)));self.progress_bar.setValue(min(self.index,len(self.queue)));self.progress_bar.setVisible(bool(self.queue))
+        self.reveal.setText('Reveal expression' if recall else 'Reveal meaning')
         interval=min(365,max(1,int(item.get('interval_days',0))*2))
         self.remembered.setText(f'Remembered · {interval} '+('day' if interval==1 else 'days'))
 
     def reveal_answer(self):
         if self.index>=len(self.queue):return
         item=self.queue[self.index];self.revealed=True
+        self.practice_audio.bind(item)
+        self.practice_listen.bind(item.get('native_text',''),item.get('source_language',''))
         self._explanation_data(self.practice_explanation,item)
         values=((self.pronunciation,item.get('native_phonetics','')),
-            (self.back,answer_text(item,self.mode.currentData())),
+            (self.back,item.get('target_text','') if self.mode.currentData()=='understand' else answer_text(item,self.mode.currentData())),
             (self.practice_usage,' · '.join(x for x in (item.get('usage',''),item.get('usage_note',''),item.get('uncertainty','')) if x)),
             (self.practice_notes,'Your notes · '+item['notes'] if item.get('notes') else ''),
             (self.practice_context,'Earlier dialogue · '+' / '.join(x.get('text','') for x in item.get('conversation_context',[]) if isinstance(x,dict)) if item.get('conversation_context') else ''))
@@ -306,10 +362,12 @@ class LearningDeckContent:
         except (ValueError,OSError) as exc:self.progress.setText(str(exc));return
         self.session_results.append('remembered' if remembered else 'again')
         self.index+=1;self.show_card()
+        self.practice_feedback.setText('Review saved.' if remembered else 'Review saved · revisit in 10 minutes.');self.practice_feedback.show()
 
     def skip_card(self):
         if self.index>=len(self.queue):return
         self.session_results.append('skipped');self.index+=1;self.show_card()
+        self.practice_feedback.setText('Skipped · review date unchanged.');self.practice_feedback.show()
 
     def _stash_draft(self):
         if self.loading or not self._loaded_card_id:return
@@ -329,12 +387,14 @@ class LearningDeckContent:
 
     def activate(self):
         self.refresh_if_changed()
+        self.list.viewport().update();self.editor.update_saved_time(self._loaded_item)
         if self.embedded:self._adapt_layout()
 
     def back_to_cards(self):
         self._detail_open=False;self._adapt_layout()
 
     def _adapt_layout(self):
+        self.practice_center.setFixedWidth(max(200,min(680,self.width()-24)))
         if not self.embedded:return
         compact=self.width()<780;has_item=bool(self._loaded_card_id)
         self.editor.back.setVisible(compact)
@@ -343,18 +403,22 @@ class LearningDeckContent:
         if self._compact!=compact and not compact:self.cards_split.setSizes([300,max(400,self.width()-320)])
         self._compact=compact
 
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,'practice_center'):self._adapt_layout()
+
     def dispose(self):
         if self.disposed:return
+        if self.events is not None:
+            try:self.events.card_saved.disconnect(self._card_saved)
+            except (TypeError,RuntimeError):pass
+        self.editor.audio.dispose();self.practice_audio.dispose();self.editor.listen.dispose();self.practice_listen.dispose()
         self.disposed=True;self.editor.deactivate();self.editor.explanation.dispose();self.practice_explanation.dispose()
 
 
 class LearningDeckPage(LearningDeckContent,QWidget):
     def __init__(self,config,phrasebook,parent=None,events=None,service=None):
         super().__init__(config,phrasebook,parent,events,service,embedded=True)
-
-    def resizeEvent(self,event):
-        super().resizeEvent(event)
-        if hasattr(self,'editor'):self._adapt_layout()
 
 
 class LearningDeckDialog(LearningDeckContent,QDialog):

@@ -8,12 +8,14 @@ from core.config import LANGUAGE_LABELS
 from ui.copyable_text import CopyableLabel
 
 
-def highlighted(before,after):
+def highlighted(before,after,theme='dark'):
+    from ui.theme_tokens import palette_for
+    colors=palette_for(theme)
     old=[];new=[]
     for tag,a,b,c,d in SequenceMatcher(None,before,after,autojunk=False).get_opcodes():
         left,right=escape(before[a:b]),escape(after[c:d])
-        old.append(left if tag=='equal' else '<span style="background:#633c3c;color:#ffe0e0;text-decoration:line-through">'+left+'</span>')
-        new.append(right if tag=='equal' else '<span style="background:#254c3b;color:#d8ffe9">'+right+'</span>')
+        old.append(left if tag=='equal' else f'<span style="color:{colors["alert"]};text-decoration:line-through">'+left+'</span>')
+        new.append(right if tag=='equal' else f'<span style="background:{colors["wash"]};color:{colors["accent"]}">'+right+'</span>')
     return ''.join(old),''.join(new)
 
 
@@ -33,7 +35,8 @@ class HistoryComparison(QTextBrowser):
 def build_details(study,update,store,analysis,history):
     from PySide6.QtWidgets import QDialog,QMenu
     from ui.icons import icon_button
-    study.setWindowTitle('Sentence details');study.resize(480,700)
+    from ui.theme import style_for
+    study.setObjectName('sentenceStudy');study.setWindowTitle('Sentence details');study.setStyleSheet(style_for(study.config.theme));study.resize(480,700)
     outer=QVBoxLayout(study);outer.setContentsMargins(14,12,14,12);outer.setSpacing(8)
     header=QHBoxLayout();title=QLabel('Sentence');title.setObjectName('field');header.addWidget(title);header.addStretch()
     study.replay=icon_button('play','Replay retained audio',study)
@@ -58,8 +61,9 @@ def build_details(study,update,store,analysis,history):
         else:study.feedback.setText('Audio is unavailable or has expired.')
     study.replay.clicked.connect(replay);header.addWidget(study.replay);header.addWidget(study.speed)
     study.bookmark=icon_button('bookmark','Save to deck',study);header.addWidget(study.bookmark)
+    study.reply_button=icon_button('conversation','How could I reply?',study);study.reply_button.setCheckable(True);header.addWidget(study.reply_button)
     more=icon_button('more','More sentence tools',study);header.addWidget(more)
-    close=icon_button('close','Close sentence details',study);close.clicked.connect(study.reject);header.addWidget(close);outer.addLayout(header)
+    close=icon_button('close','Close sentence details',study);study.close_button=close;close.clicked.connect(study.reject);header.addWidget(close);outer.addLayout(header)
     tabs=QTabWidget();study.pages=tabs;outer.addWidget(tabs,1)
     body=QWidget();layout=QVBoxLayout(body);layout.setContentsMargins(8,12,8,12);layout.setSpacing(7);layout.setAlignment(Qt.AlignmentFlag.AlignTop)
     scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setFrameShape(QFrame.Shape.NoFrame);scroll.setWidget(body);tabs.addTab(scroll,'Sentence')
@@ -75,11 +79,11 @@ def build_details(study,update,store,analysis,history):
     study.reading_section,source_box=section('sentenceReadingSection','Original speech')
     study.route_label=QLabel();study.route_label.setObjectName('hint')
     route_heading=QHBoxLayout();route_heading.addWidget(study.route_label,1);study.route_review_icon=QLabel();route_heading.addWidget(study.route_review_icon);source_box.addLayout(route_heading)
-    study.source_display=CopyableLabel();study.source_display.setWordWrap(True);study.source_display.setStyleSheet('font-size:20px;font-weight:500;');source_box.addWidget(study.source_display)
+    study.source_display=CopyableLabel();study.source_display.setWordWrap(True);study.source_display.setObjectName('sentenceOriginal');source_box.addWidget(study.source_display)
     study.pronunciation=CopyableLabel();study.pronunciation.setWordWrap(True);study.pronunciation.setObjectName('phonetic');source_box.addWidget(study.pronunciation)
     study.translation_section,translation_box=section('sentenceTranslationSection','Translation')
     study.review_status_label=QLabel();study.review_status_label.setObjectName('reviewStatus');study.review_status_label.setWordWrap(True);study.translation_heading_row.addWidget(study.review_status_label)
-    study.translation_display=CopyableLabel();study.translation_display.setWordWrap(True);study.translation_display.setStyleSheet('font-size:16px;');translation_box.addWidget(study.translation_display)
+    study.translation_display=CopyableLabel();study.translation_display.setWordWrap(True);study.translation_display.setObjectName('sentenceTranslation');translation_box.addWidget(study.translation_display)
     study.target_pronunciation=CopyableLabel();study.target_pronunciation.setWordWrap(True);study.target_pronunciation.setObjectName('phonetic');translation_box.addWidget(study.target_pronunciation)
     for label in (study.route_label,study.source_display,study.pronunciation,study.translation_display,study.target_pronunciation):
         label.setTextFormat(Qt.TextFormat.PlainText);label.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignTop);label.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Maximum)
@@ -115,27 +119,40 @@ def build_details(study,update,store,analysis,history):
     study.comparison=HistoryComparison(study);history_box.addWidget(study.comparison);layout.addWidget(study.history_section)
     study.result=QPlainTextEdit(study);study.result.hide();study.original=QPlainTextEdit(study);study.original.hide()
     study.feedback=QLabel();study.feedback.setObjectName('hint');study.feedback.setWordWrap(True);study.feedback.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Maximum);layout.addWidget(study.feedback)
+    from ui.replies import ReplySuggestionsWidget
+    study.reply_suggestions=ReplySuggestionsWidget(study,analysis,history);layout.addWidget(study.reply_suggestions)
+    study.reply_button.toggled.connect(study.reply_suggestions.set_open)
     layout.addStretch(1)
     # Separate save popup: opening, editing, and saving never trigger inference.
-    study.save_popup=QDialog(study);study.save_popup.setWindowTitle('Save to deck');study.save_popup.setWindowModality(Qt.WindowModality.WindowModal);study.save_popup.resize(430,450)
-    saving=QVBoxLayout(study.save_popup);saving.setContentsMargins(16,14,16,14);saving.setSpacing(8)
+    study.save_popup=QDialog(study);study.save_popup.setObjectName('saveCardDialog');study.save_popup.setWindowTitle('Save to deck');study.save_popup.setWindowModality(Qt.WindowModality.WindowModal);study.save_popup.resize(460,min(680,study.screen().availableGeometry().height()-64))
+    saving=QVBoxLayout(study.save_popup);saving.setContentsMargins(20,14,20,18);saving.setSpacing(12)
     save_header=QHBoxLayout();save_title=QLabel('Save to deck');save_title.setObjectName('field');save_header.addWidget(save_title);save_header.addStretch()
     save_close=icon_button('close','Close save popup',study.save_popup);save_close.clicked.connect(study.save_popup.reject);save_header.addWidget(save_close);saving.addLayout(save_header)
-    study.save_preview=CopyableLabel();study.save_preview.setWordWrap(True);saving.addWidget(study.save_preview)
-    saving.addWidget(QLabel('Meaning'));study.save_meaning=QPlainTextEdit(update.target_text);study.save_meaning.setMaximumHeight(85);study.save_meaning.setAccessibleName('Reviewed meaning to save');saving.addWidget(study.save_meaning)
-    study.notes=QPlainTextEdit();study.notes.setMaximumHeight(70);study.notes.setPlaceholderText('Notes · optional');saving.addWidget(study.notes)
-    study.reviewed=QCheckBox('I checked the original and meaning');saving.addWidget(study.reviewed)
-    study.save=QPushButton('Save to deck');study.save.setEnabled(False);study.save.clicked.connect(study._save);saving.addWidget(study.save)
-    study.learning_feedback=QLabel();study.learning_feedback.setWordWrap(True);saving.addWidget(study.learning_feedback);saving.addStretch()
+    save_scroll=QScrollArea();save_scroll.setWidgetResizable(True);save_scroll.setFrameShape(QFrame.Shape.NoFrame)
+    from ui.save_card import SaveCardFields
+    study.save_fields=SaveCardFields(study.save_popup)
+    save_body=QWidget();save_body_layout=QVBoxLayout(save_body);save_body_layout.setContentsMargins(0,0,0,0);save_body_layout.addWidget(study.save_fields);save_body_layout.addStretch();save_scroll.setWidget(save_body);saving.addWidget(save_scroll,1)
+    study.save_preview=study.save_fields.expression;study.save_meaning=study.save_fields.meaning;study.save_meaning.setPlainText(update.target_text);study.notes=study.save_fields.notes
+    from ui.controls import ToggleSwitch
+    study.reviewed=ToggleSwitch("I've checked the expression and meaning.");saving.addWidget(study.reviewed)
+    study.learning_feedback=QLabel();study.learning_feedback.setObjectName('hint');study.learning_feedback.setWordWrap(True);saving.addWidget(study.learning_feedback)
+    study.save=QPushButton('Save card');study.save.setObjectName('primary');study.save.setEnabled(False);study.save.clicked.connect(study._save)
+    from ui.icons import set_button_icon
+    set_button_icon(study.save,'bookmark',tone='primary');saving.addWidget(study.save)
+    study.save_fields.audio.bind(store,update.audio_id,study.config,update.native_text,update.source_language,events=study.events)
+    study.save_popup.finished.connect(study.save_fields.audio.cancel_pending)
     study._save_snapshot=study.subtitle;study._save_stale=False
-    def save_enabled():study.save.setEnabled(study.reviewed.isChecked() and not study._busy and study._proposal is None and not study._save_stale)
+    def save_enabled():study.save.setEnabled(bool(study.save_meaning.toPlainText().strip()) and study.reviewed.isChecked() and not study._busy and study._proposal is None and not study._save_stale and not study.save_fields.audio.busy)
+    study.save_fields.audio.busy_changed.connect(save_enabled)
     study.reviewed.toggled.connect(save_enabled)
     study.save_meaning.textChanged.connect(lambda:study.reviewed.setChecked(False))
     def open_save():
         if study._busy or study._proposal or study.text.toPlainText()!=study.subtitle.native_text:
             study.feedback.setText('Finish reviewing the transcript before saving.');return
         study._save_snapshot=study.subtitle;study._save_stale=False;study.reviewed.setChecked(False)
-        study.save_meaning.setPlainText(study.subtitle.target_text);study.learning_feedback.setText('Text only · No audio saved');study.save_popup.open()
+        study.save_fields.set_context(study.subtitle.native_text,study.subtitle.native_phonetics,study.subtitle.source_language)
+        study.save_fields.audio.bind(store,study.subtitle.audio_id,study.config,study.subtitle.native_text,study.subtitle.source_language,events=study.events)
+        study.save_meaning.setPlainText(study.subtitle.target_text);study.learning_feedback.setText('Sentence card · original conversation');study.save_popup.open()
     study.bookmark.clicked.connect(open_save)
     def refresh_review_status():
         labels={'not_requested':'Not reviewed','awaiting':'Awaiting review','reviewing':'Reviewing…','refined':'AI refined','unchanged':'Reviewed · unchanged','skipped':'Review skipped','failed':'Review failed'}
@@ -154,12 +171,14 @@ def build_details(study,update,store,analysis,history):
         study.review_status_label.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Maximum)
     study._refresh_review_status=refresh_review_status
     def refresh():
+        study.reply_suggestions.sync()
         snapshot=(study.text.toPlainText(),study.subtitle.target_text,study.source.currentData(),study.target.currentData())
         if snapshot!=getattr(study,'_review_snapshot',None):
             study.reviewed.setChecked(False);study._review_snapshot=snapshot
             if study.save_popup.isVisible():
                 study._save_stale=True;study.learning_feedback.setText('Sentence changed. Close and reopen this popup to review the latest wording.')
-        save_enabled();study.save_preview.setText(study.subtitle.native_text+'\n'+study.subtitle.native_phonetics)
+        save_enabled()
+        if not study.save_popup.isVisible():study.save_fields.set_context(study.subtitle.native_text,study.subtitle.native_phonetics,study.subtitle.source_language)
         candidate=study._proposal or study.subtitle
         source=study.text.toPlainText();study.source_display.setText(source);study.translation_display.setText(candidate.target_text or 'Translation unavailable')
         refresh_review_status()
@@ -174,7 +193,7 @@ def build_details(study,update,store,analysis,history):
         parts=[]
         for heading,before,after in (('Transcript changes',first_source,candidate.native_text),('Translation history',first_target,candidate.target_text)):
             if before==after:continue
-            left,right=highlighted(before,after);parts.append(('<h3>'+heading+'</h3>' if heading=='Transcript changes' else '')+'<p>First version</p><p>'+left+'</p><p>Current'+(' / proposed' if study._proposal else '')+'</p><p>'+right+'</p>')
+            left,right=highlighted(before,after,study.config.theme);parts.append(('<h3>'+heading+'</h3>' if heading=='Transcript changes' else '')+'<p>First version</p><p>'+left+'</p><p>Current'+(' / proposed' if study._proposal else '')+'</p><p>'+right+'</p>')
         study.comparison.setHtml(''.join(parts));study.comparison.fit_content();study.comparison.setVisible(bool(parts));study.compare_toggle.setVisible(bool(parts));study.history_section.setVisible(bool(parts))
     study._refresh_details=refresh
     study.text.textChanged.connect(refresh);study.result.textChanged.connect(refresh);study.original.textChanged.connect(refresh);study.source.currentIndexChanged.connect(refresh);study.target.currentIndexChanged.connect(refresh)

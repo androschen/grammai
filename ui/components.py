@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
     QFrame,
@@ -152,12 +152,28 @@ class AudioMeterWidget(QWidget):
         self._marker.setFixedWidth(4 if interactive else 2)
         self._marker.setStyleSheet("QFrame { background-color: #E53935; border: none; border-radius: 1px; }")
 
-        stack = QStackedLayout(self)
-        stack.setContentsMargins(0, 0, 0, 0)
-        stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-        stack.addWidget(self.progress_bar)
-        stack.addWidget(self._marker_layer)
-        stack.setCurrentWidget(self._marker_layer)
+        # Center the visual track within a larger mouse target. Both layers
+        # use this same coordinate system instead of separate stacked layouts.
+        self.progress_bar.setFixedHeight(8)
+        self._marker.setFixedWidth(2)
+        self._marker_layer.raise_()
+        self._meter_theme=None;self._refresh_theme()
+
+    def _refresh_theme(self):
+        from PySide6.QtWidgets import QApplication
+        from ui.theme_tokens import palette_for
+        theme=QApplication.instance().property('grammai_theme') or 'dark'
+        if self._meter_theme==theme:return
+        self._meter_theme=theme;p=palette_for(theme)
+        track=f"QProgressBar {{ background:{p['soft']}; border:none; border-radius:4px; color:transparent; min-height:8px; max-height:8px; }}"
+        self.INACTIVE_STYLE=track+f"QProgressBar::chunk {{ background:{p['muted']}; border:none; border-radius:4px; }}"
+        self.ACTIVE_STYLE=track+f"QProgressBar::chunk {{ background:{p['accent']}; border:none; border-radius:4px; }}"
+        self.progress_bar.setStyleSheet(self.ACTIVE_STYLE if self._is_active else self.INACTIVE_STYLE)
+        self._marker.setStyleSheet(f"QFrame {{ background:{p['alert']}; border:none; border-radius:1px; }}")
+
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if hasattr(self,'_meter_theme') and event.type() in (QEvent.Type.StyleChange,QEvent.Type.PaletteChange):self._refresh_theme()
 
     def set_threshold(self, percent: int) -> None:
         self.threshold = max(1, min(80, int(percent)))
@@ -198,7 +214,7 @@ class AudioMeterWidget(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        QTimer.singleShot(0, self, self._place_marker)
+        self._place_marker()
 
     def _set_threshold_from_x(self, x: float) -> None:
         width = max(self.width(), 1)
@@ -207,12 +223,15 @@ class AudioMeterWidget(QWidget):
         self.threshold_changed.emit(self.threshold)
 
     def _place_marker(self) -> None:
-        width = max(self._marker_layer.width(), 1)
-        height = self._marker_layer.height()
-        marker_w = self._marker.width()
-        x = int(round((width - marker_w) * self.threshold / 100.0))
-        x = max(0, min(width - marker_w, x))
-        self._marker.setGeometry(x, 0, marker_w, height)
+        if not hasattr(self,'_marker_layer'):return
+        self.progress_bar.setGeometry(0,(self.height()-8)//2,self.width(),8)
+        self._marker_layer.setGeometry(self.rect())
+        track=self.progress_bar.geometry();marker_w=self._marker.width()
+        marker_h=min(self.height(),track.height()+4)
+        x=track.left()+int(round((max(0,track.width()-marker_w))*self.threshold/100))
+        y=track.center().y()-(marker_h-1)//2
+        self._marker.setGeometry(x,y,marker_w,marker_h)
+
 
 
 GATE_PRESETS: tuple[tuple[str, int], ...] = (
@@ -229,6 +248,8 @@ class NoiseGateEditor(QWidget):
 
     def __init__(self, parent: QWidget | None = None, threshold: int = 12) -> None:
         super().__init__(parent)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Maximum)
         self._volume = 0
 
         title = QLabel("Noise gate")

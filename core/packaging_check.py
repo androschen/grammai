@@ -24,7 +24,20 @@ def smoke_check(report,verify_models=False):
         results['chinese_pronunciation']=bool(phonetics_auto('\u4f60\u597d'))
         results['thai_pronunciation']=bool(phonetics_auto('\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35'))
         results['vad_silence']=StreamingSpeechDetector()(np.zeros(640,dtype=np.float32))<.5
+        from audio.pronunciation import PronunciationService
+        from ui.pronunciation import ListenWidget
+        from PySide6.QtTextToSpeech import QTextToSpeech
         events=EventBus()
+        speech=PronunciationService(events);events.pronunciation_service=speech
+        results['windows_speech']={'engines':QTextToSpeech.availableEngines(),'voices':speech.inventory()}
+        import sys
+        if sys.platform=='win32':
+            assert any(x in results['windows_speech']['engines'] for x in ('winrt','sapi')), 'Native Windows speech plugins missing'
+        listen=ListenWidget(events);listen.bind('Hello','en')
+        assert listen.play.isEnabled()==bool(speech.voice('en'))
+        listen.bind('你好','zh',locked=True);assert not listen.play.isEnabled()
+        listen.dispose();listen.deleteLater();results['listen_ui']='ok'
+
         dialog=StudyDialog(SubtitleUpdate('','Hello','Hello',source_language='en'),AppConfig(),events,ReplayStore(),None)
         dialog.show();QApplication.processEvents()
         results['details']='ok';dialog.reject();dialog.deleteLater()
@@ -55,6 +68,13 @@ def smoke_check(report,verify_models=False):
         assert deck.editor.edit_fields.isHidden() and deck.editor.checked.isHidden()
         assert deck.editor.save.text()=='Save notes'
         results['reading_card_ui']='ok'
+        from core.card_time import saved_time
+        assert saved_time('2026-10-24T07:32:00+00:00')[0]!='Date unavailable'
+        if deck.items:
+            assert deck.editor.saved_at.text().startswith('Saved ')
+            doc=deck.list.itemDelegate().document(deck.list.model().index(0,0),300,deck.palette())
+            assert saved_time(deck.items[0].get('saved_at'))[0] in doc.toPlainText()
+        results['card_saved_time_ui']='ok'
         from PySide6.QtCore import Qt
         assert deck.editor.windowModality()==Qt.WindowModality.WindowModal
         from core.learning_cards import practice_prompt
@@ -76,7 +96,12 @@ def smoke_check(report,verify_models=False):
         assert not page.isWindow() and not page.editor.isWindow()
         assert page.editor.window() is host
         assert page.list.count()==results['deck_storage'].get('reader_count',page.list.count())
-        results['single_window_deck']='ok';page.dispose();host.deleteLater()
+        results['single_window_deck']='ok';page.dispose()
+        from ui.settings import SettingsPage
+        from ui.performance import ResourcesPage
+        preferences=SettingsPage(AppConfig(),events,host);assert not preferences.isWindow();preferences.activate();preferences.suspend();preferences.dispose();preferences.deleteLater()
+        resources=ResourcesPage(events,host);assert not resources.isWindow();resources.deleteLater()
+        results['unified_workspace']='ok';host.deleteLater()
         from ui.phrase_explain import PhraseExplanationDialog
         from core.analysis import AnalysisService
         phrase_service=AnalysisService(events=events,config=AppConfig())
@@ -84,7 +109,41 @@ def smoke_check(report,verify_models=False):
             {'phrase':'gua','sentence':'gua beli nasi dulu','language':'id','original_text':'gua beli nasi dulu','original_language':'id'},Phrasebook())
         # Do not process the queued automatic explanation during a UI-only smoke.
         phrase.reject();phrase.deleteLater();phrase_service.shutdown()
+        from ui.save_card import SaveCardFields
+        assert isinstance(phrase.form,SaveCardFields)
+        results['compact_save_ui']='ok'
         results['phrase_explanation_ui']='ok'
+        import tempfile,os
+        from audio.library import AudioLibrary
+        original_data_dir=os.environ.get('GRAMMAI_DATA_DIR')
+        with tempfile.TemporaryDirectory() as audio_test_dir:
+            try:
+                os.environ['GRAMMAI_DATA_DIR']=audio_test_dir
+                library=AudioLibrary();audio=np.sin(np.arange(16000,dtype=np.float32)*.03)*.1
+                recording=library.save(audio)
+                decoded=library.load(recording['file'])
+                assert len(decoded)==len(audio) and np.mean((decoded-audio)**2)<.01
+                book=Phrasebook();item=book.save(SubtitleUpdate('','Hello','Hello'),audio=recording)
+                assert Phrasebook().items()[0]['audio']['file']==recording['file']
+                from ui.card_audio import AudioTransport
+                transport=AudioTransport(events);transport.bind(item,locked=True);assert not transport.play.isEnabled()
+                transport.bind(item);assert transport.play.isEnabled();transport.dispose();transport.deleteLater()
+                results['saved_audio_roundtrip']='ok'
+                from ui.learning import StudyDialog
+                reply_study=StudyDialog(SubtitleUpdate('','Sudah makan?','你吃饭了吗？',source_language='zh',target_language='id'),AppConfig(),events,ReplayStore(),book)
+                widget=reply_study.reply_suggestions;widget.token='packaged-reply'
+                widget.completed('packaged-reply',dict(status='ready',reason='',replies=[dict(text='还没，你呢？',meaning='Belum, kamu?',label='Kalau belum makan'),dict(text='吃了，谢谢。',meaning='Sudah makan, terima kasih.',label='Kalau sudah makan')]))
+                assert widget.rows.count()==2
+                widget.save_reply(widget.value['replies'][0]);popup=widget.popup
+                assert popup.form.audio.isHidden() and not popup.save.isEnabled()
+                popup.checked.setChecked(True);popup.commit()
+                generated=next(x for x in book.items() if x.get('card_type')=='reply')
+                assert generated['reply_question']=='你吃饭了吗？' and 'audio' not in generated
+                assert not popup.isVisible();reply_study.reject();reply_study.deleteLater()
+                results['reply_suggestions_ui']='ok'
+            finally:
+                if original_data_dir is None:os.environ.pop('GRAMMAI_DATA_DIR',None)
+                else:os.environ['GRAMMAI_DATA_DIR']=original_data_dir
         results['existing_speech_model']=installed_paths()[1].is_file()
         results['existing_context_model']=managed_paths()[1].is_file()
         if verify_models:
