@@ -2,7 +2,7 @@
 
 Learn languages from real conversations, locally on Windows.
 
-**[Download v0.13.0](https://github.com/androschen/grammai/releases/tag/v0.13.0)** · [Windows setup](WINDOWS.md) · [User guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
+**[Source v0.15.3](https://github.com/androschen/grammai/tree/v0.15.3)** · [Windows installer v0.13.0](https://github.com/androschen/grammai/releases/tag/v0.13.0) · [Windows setup](WINDOWS.md) · [User guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
 
 ![GrammAI learning deck with conversation examples and pronunciation](docs/images/grammai-desktop.png)
 
@@ -11,6 +11,8 @@ Learn languages from real conversations, locally on Windows.
 ## Features
 
 - Live transcription and translation from desktop audio or a microphone.
+- Switch speech models: Whisper base, large-v3-turbo, large-v3 or experimental Qwen3-ASR.
+- Separate live translation and optional AI refinement, with model information in sentence details.
 - Chinese, Thai, English and Indonesian, with Pinyin and Thai romanization.
 - Compact subtitles, a unified light/dark interface, and CPU/GPU resource graphs.
 - Saved vocabulary, notes, word explanations, original audio and recall practice.
@@ -22,7 +24,7 @@ Speech recognition, translation and AI explanations run locally after model setu
 
 Install the Windows package from [Releases](https://github.com/androschen/grammai/releases/latest), configure your models, select an audio source and languages, then press Play. Use CC to show or hide desktop subtitles.
 
-For development:
+For the latest source version:
 
 ```powershell
 python -m pip install -r requirements.txt
