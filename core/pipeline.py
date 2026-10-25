@@ -205,6 +205,10 @@ class TranslationPipeline(QObject):
         if not self._worker:
             return ""
         config = self._worker.config
+        backend=getattr(self._engine,'active_backend','')
+        if 'backup' in backend:return 'Whisper base (CPU backup)'
+        if config.speech_model_id=='speech-cpu':return 'Whisper base'
+        if config.speech_model_id=='speech-turbo':return 'Whisper large-v3-turbo'
         return config.model_size if config.backend == "cpu" else Path(config.vulkan_model).name
 
     @property
@@ -223,6 +227,9 @@ class TranslationPipeline(QObject):
 
     @Slot(object)
     def request_benchmark(self, config):
+        from ui.model_setup import active_jobs
+        if active_jobs():
+            self._events.benchmark_progress.emit('Finish or cancel model setup first.');return
         if self._events.property('comparison_busy'):
             self._events.benchmark_progress.emit('Finish or cancel translator comparison first.')
             return
@@ -305,6 +312,9 @@ class TranslationPipeline(QObject):
         self._want_capture = True
 
     def start_inference(self):
+        from ui.model_setup import active_jobs
+        if active_jobs():
+            self._events.status_changed.emit('Finish or cancel model setup before starting live translation.');self.inference_failed.emit();return
         if self._events.property('comparison_busy'):
             self._events.status_changed.emit('Finish or cancel translator comparison before starting live subtitles.')
             self.inference_failed.emit()

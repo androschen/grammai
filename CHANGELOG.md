@@ -2,6 +2,26 @@
 
 Versions 0.7.2–0.9.7 below describe local desktop builds first published together in v0.9.8.
 
+## 0.14.1 — Models interaction and layout fix
+
+- Fix an empty sibling widget intercepting mouse input on Settings → Models. Construct overview and component pages with correct widget ownership instead of moving raw layout items.
+- Match the approved Models design more closely with compact role cards, visible running/shared-model badges, fewer nested tabs and a visible component list.
+- Add window-level pointer regression tests for selectors, component navigation, setup and test actions, plus packaged input hit-testing.
+
+## 0.14.0 — Modular setup and models
+
+- Add a first-launch setup assistant with explicit component selection, download sizes, storage location and real compatibility/speed checks. Existing preferences retain their model paths and skip onboarding.
+- Separate pinned CPU speech, GPU speech, fast translation, shared Qwen weights and CPU/Vulkan runtimes. Downloads resume, verify checksums and activate atomically; model downloads never start implicitly during inference.
+- Add inline component management, verification, repair rollback and verified managed-model relocation. External files are reused in place and never removed by the manager.
+- Remove AMD-only AI selection and fixed thread assumptions; add explicit CPU inference, generic Vulkan device selection and optional installed CPU fallback. CUDA-specific packages remain a later addition.
+- Keep selected and running status separate, preserve model selection when changing decoding effort, and block conflicting inference while component tasks run.
+
+## 0.13.1 — Detect installed language voices
+
+- Enumerate Windows speech voices across every supported installed locale instead of only the default language. Chinese, Thai and Indonesian voices no longer remain hidden behind the English locale.
+- Select the matching locale before selecting its voice for playback, and reject mismatched or Cantonese-only voices for Mandarin pronunciation.
+- Keep the same Listen controls and capture/replay safeguards. No registry edits, voice downloads or additional models are required.
+
 ## 0.13.0 — Local pronunciation
 
 - Add compact Listen/Stop and normal/slower Windows pronunciation to reply suggestions, saved card details and Practice. Recall mode unlocks pronunciation only after Reveal.

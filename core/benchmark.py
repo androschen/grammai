@@ -20,6 +20,9 @@ REFERENCE = "The meeting starts at three in the afternoon."
 
 
 def fixture():
+    bundled=Path(__file__).resolve().parents[1]/'ui/assets/setup-speech.pcm16'
+    if bundled.is_file():
+        raw=bundled.read_bytes();return np.frombuffer(raw,dtype='<i2').astype(np.float32)/32768,hashlib.sha256(raw).hexdigest()
     path = data_dir() / "benchmark.wav"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.is_file():

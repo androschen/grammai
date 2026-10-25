@@ -47,7 +47,7 @@ class TranslationComparisonDialog(QDialog):
         self.recent=QComboBox();self.recent.setPlaceholderText('Recent comparisons (this window only)')
         self.recent.currentIndexChanged.connect(self._render);layout.addWidget(self.recent)
         results=QHBoxLayout();self.cards={}
-        for engine,label in (('nllb','NLLB · CPU baseline'),('qwen','Qwen · local GPU translator')):
+        for engine,label in (('nllb','NLLB · CPU baseline'),('qwen','Qwen · local AI translator')):
             frame=QFrame();frame.setObjectName('sentenceTranslation' if engine=='qwen' else 'sentenceSource')
             box=QVBoxLayout(frame);box.setContentsMargins(16,16,16,16)
             heading=QLabel(label);heading.setObjectName('field');heading.setWordWrap(True);box.addWidget(heading)

@@ -31,7 +31,9 @@ class Engine(QObject):
     stateChanged = Signal(object)
     def __init__(self, locales=('en_US', 'zh_CN', 'th_TH', 'id_ID')):
         super().__init__(); self.voices = [Voice(x) for x in locales]; self.spoken = []; self.selected = None; self.rate = 0.; self.stops = 0
-    def availableVoices(self): return self.voices
+    def availableLocales(self): return [QLocale(code) for code in dict.fromkeys(v.code for v in self.voices)]
+    def setLocale(self, locale): self.current_locale = locale.name()
+    def availableVoices(self): return [v for v in self.voices if v.locale().name() == getattr(self, 'current_locale', 'en_US')]
     def state(self): return QTextToSpeech.State.Ready
     def setVoice(self, value): self.selected = value
     def setRate(self, value): self.rate = value
@@ -48,6 +50,13 @@ class PronunciationTests(unittest.TestCase):
         self.events.pronunciation_service = self.speech
     def tearDown(self):
         self.speech.stop(); QTest.qWait(210)
+    def test_modern_windows_voices_do_not_load_unused_legacy_sapi_engine(self):
+        names=[]
+        service=PronunciationService(self.events,engine_factory=lambda name:(names.append(name) or Engine()),engines=['winrt','sapi'])
+        self.assertIsNotNone(service.voice('zh'));self.assertEqual(names,['winrt']);service.dispose()
+    def test_disposal_releases_native_engines_and_does_not_reinitialize_them(self):
+        self.speech.inventory();self.speech.dispose();self.speech.dispose()
+        self.assertEqual(self.speech.inventory(),{});self.assertIsNone(self.speech.voice('en'));self.assertEqual(self.speech._engines,[])
     def test_discovery_is_lazy_and_never_uses_mock_or_wrong_language(self):
         self.assertFalse(self.speech._loaded)
         self.assertEqual(set(self.speech.inventory()), {'en','zh','th','id'})
@@ -56,6 +65,17 @@ class PronunciationTests(unittest.TestCase):
         self.assertEqual(self.engine.spoken, [])
         empty = PronunciationService(self.events, engine_factory=lambda name:self.fail('Must not create mock engine'), engines=['mock'])
         self.assertEqual(empty.inventory(), {})
+    def test_locale_scoped_windows_voices_are_discovered_and_selected_for_playback(self):
+        self.assertEqual([v.locale().name() for v in self.engine.availableVoices()], ['en_US'])
+        self.assertIsNotNone(self.speech.voice('zh'))
+        self.assertEqual(set(self.speech.inventory()), {'en','zh','th','id'})
+        self.speech.play('tts:chinese','你好','zh')
+        self.assertEqual(self.engine.current_locale,'zh_CN')
+        self.assertEqual(self.engine.selected.locale().name(),'zh_CN')
+        self.speech.play('tts:english','Hello','en')
+        self.assertEqual(self.engine.current_locale,'en_US')
+        self.assertEqual(self.engine.selected.locale().name(),'en_US')
+
     def test_language_voice_text_and_speed_match_without_model_or_disk(self):
         self.assertTrue(self.speech.play('tts:one', '你好！', 'zh-CN', .8))
         self.assertEqual(self.engine.selected.locale().name(), 'zh_CN'); self.assertEqual(self.engine.spoken, ['你好！'])
@@ -65,9 +85,9 @@ class PronunciationTests(unittest.TestCase):
         active=[]; failures=[]; self.events.playback_active.connect(active.append);self.speech.failed.connect(lambda k,m:failures.append(m))
         self.speech.play('tts:a', 'Hello', 'en'); self.speech.stop(); self.speech.stop(); settle(lambda: active == [True,False])
         self.assertEqual(active, [True,False])
-        self.speech.play('tts:b', 'Hello', 'en'); self.engine.stateChanged.emit(QTextToSpeech.State.Ready); QTest.qWait(220)
+        self.speech.play('tts:b', 'Hello', 'en'); self.engine.stateChanged.emit(QTextToSpeech.State.Ready); settle(lambda: active[-1] is False)
         self.assertFalse(active[-1])
-        self.speech.play('tts:c', 'Hello', 'en'); self.engine.stateChanged.emit(QTextToSpeech.State.Error);QTest.qWait(220)
+        self.speech.play('tts:c', 'Hello', 'en'); self.engine.stateChanged.emit(QTextToSpeech.State.Error);settle(lambda: active[-1] is False)
         self.assertIn('Output disconnected', failures[-1]);self.assertFalse(active[-1])
     def test_recording_and_speech_handoff_never_resume_capture_during_playback(self):
         player=AudioReplay(self.events, ReplayStore()); active=[]; self.events.playback_active.connect(active.append)
@@ -77,7 +97,7 @@ class PronunciationTests(unittest.TestCase):
         self.events.setProperty('replay_active',False)
         self.speech.play('tts:b','Hello','en'); player._resume_capture()
         self.assertTrue(active[-1]);self.assertNotIn(False,active)
-        self.speech.stop();QTest.qWait(220);self.assertFalse(active[-1])
+        self.speech.stop();settle(lambda: active[-1] is False);self.assertFalse(active[-1])
     def test_silent_backend_timeout_and_late_saved_audio_load_are_cancelled(self):
         player=AudioReplay(self.events,ReplayStore());old=player._generation
         self.engine.say=lambda text:None

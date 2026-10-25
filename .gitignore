@@ -51,3 +51,7 @@ model-locations.json
 # Saved private card recordings
 *.ogg
 *.opus
+
+# Private model-management records
+components.json
+components.json.*

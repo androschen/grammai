@@ -64,8 +64,8 @@ def download(url, path, expected_bytes, expected_sha, progress, cancelled):
     partial.replace(path)
 
 
-def install(progress=lambda message, percent: None, cancelled=lambda: False, root=ASSET_ROOT):
-    root = Path(root)
+def install(progress=lambda message, percent: None, cancelled=lambda: False, root=None):
+    root = Path(root or model_root()/'local-ai')
     root.mkdir(parents=True, exist_ok=True)
     if shutil.disk_usage(root).free < MODEL_BYTES + 512 * 1024 ** 2:
         raise ValueError('At least 3 GB of free disk space is required for setup.')

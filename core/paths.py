@@ -8,6 +8,9 @@ def model_root():
     override=os.environ.get('GRAMMAI_MODELS_DIR')
     if override:
         return Path(override)
+    from core.preferences import read_json
+    managed=read_json('components.json',{})
+    if isinstance(managed,dict) and managed.get('root'):return Path(managed['root'])
     if not getattr(sys,'frozen',False):
         return Path(__file__).resolve().parents[1]/'models'
     from core.preferences import data_dir

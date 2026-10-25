@@ -43,24 +43,45 @@ class WhisperEngine:
     def is_loaded(self) -> bool:
         return self._model is not None or self._vulkan is not None
 
-    def ensure_loaded(self) -> None:
+    def ensure_loaded(self,cancelled=lambda:False) -> None:
         key = (self._config.backend, self._config.model_size, self._config.cpu_threads,
-               self._config.vulkan_executable, self._config.vulkan_model, self._config.beam_size)
+               self._config.vulkan_executable, self._config.vulkan_model, self._config.beam_size,self._config.processing_mode,self._config.speech_model_id,self._config.gpu_device)
         if self.is_loaded and self._loaded_size == key:
             return
         self.close()
-        if self._config.backend == "vulkan":
+        from dataclasses import replace
+        from core.components import resolve
+        config=self._config
+        used_backup=False
+        managed_cpu=resolve('speech-cpu') if config.speech_model_id!='external' or config.processing_mode=='auto' else None
+        gpu_requested=config.processing_mode=='gpu' or (config.processing_mode in ('auto','legacy') and config.backend=='vulkan')
+        if config.speech_model_id=='speech-turbo':
+            runtime,model=resolve('speech-runtime'),resolve('speech-turbo')
+            if not runtime or not model:raise ValueError('Install the selected speech model and runtime in Models.')
+            config=replace(config,vulkan_executable=str(runtime),vulkan_model=str(model))
+            gpu_requested=config.processing_mode!='cpu'
+        if config.speech_model_id=='speech-cpu':gpu_requested=False
+        if gpu_requested:
             from ml.vulkan_engine import VulkanWhisper
-            self._vulkan = VulkanWhisper(self._config)
+            self._vulkan = VulkanWhisper(config)
             try:
-                self._vulkan.start()
-            except Exception:
+                self._vulkan.start(cancelled=cancelled)
+            except Exception as exc:
                 self.close()
-                raise
-            self.active_backend = "Radeon / Vulkan"
-            self._loaded_size = key
-            return
-        size = self._config.model_size
+                if cancelled():raise InterruptedError('Cancelled') from exc
+                used_backup=True
+                if config.processing_mode!='auto' or managed_cpu is None:raise RuntimeError('GPU speech could not start. Open Models to retry or select an installed CPU model. '+str(exc)) from exc
+                if self.activity_callback:self.activity_callback('GPU unavailable; using installed Whisper base CPU backup. Quality may differ.')
+            else:
+                self.active_backend = "GPU / Vulkan"
+                self._loaded_size = key
+                return
+        if config.processing_mode=='cpu' and (config.speech_model_id=='speech-turbo' or (config.speech_model_id=='external' and config.backend=='vulkan')):
+            from ml.vulkan_engine import VulkanWhisper
+            self._vulkan=VulkanWhisper(config);self._vulkan.start(cpu_only=True,cancelled=cancelled)
+            self.active_backend='CPU / whisper.cpp';self._loaded_size=key;return
+        size = str(managed_cpu.parent) if managed_cpu and (config.speech_model_id=='speech-cpu' or config.processing_mode=='auto') else self._config.model_size
+        if config.speech_model_id=='speech-cpu' and managed_cpu is None:raise ValueError('Install the CPU speech model in Models first.')
         from faster_whisper import WhisperModel
 
         self._model = WhisperModel(
@@ -68,9 +89,10 @@ class WhisperEngine:
             device=self._config.device,
             compute_type=self._config.compute_type,
             cpu_threads=self._config.cpu_threads,
+            local_files_only=True,
         )
         self._loaded_size = key
-        self.active_backend = "CPU / int8"
+        self.active_backend = "CPU / int8 · Whisper base backup (GPU unavailable)" if used_backup else "CPU / int8"
 
     def close(self):
         if self._translator is not None:

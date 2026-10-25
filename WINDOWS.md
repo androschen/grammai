@@ -82,3 +82,15 @@ capture, click-through overlay behavior and hardware drivers on a clean PC.
 ## Release versioning
 
 The current release is **0.13.0**, tagged **v0.13.0** in Git. Version values are synchronized in `core/version.py`, `packaging/version.txt`, and `packaging/installer.iss`. Build the installer and portable archive with `python -m scripts.build_windows --installer`. These generated binaries and model weights are not committed to the repository. See `CHANGELOG.md` for release notes.
+
+## Modular setup (local builds from 0.14.0)
+
+New installations open **Your PC → Components → Ready**. Review model sizes and location, then choose **Install & test**. Setup verifies downloads and measures compatibility/speed before Start. Essential setup supports transcription without translation or the learning model.
+
+Existing installations keep their configured files and skip onboarding. Open **Settings → Models → Setup assistant** to reconfigure, or **Manage components → Find installed models** to register recognized files in place. Import custom runtimes/models through Advanced. External originals are never removed by component cleanup.
+
+Speech recognition, fast CPU translation and shared learning AI are separate components. Qwen weights are shared by contextual translation, explanations and reply suggestions. CPU and Vulkan runtimes are independent downloads. CUDA-specific packages are not included in this release.
+
+Automatic mode may use an already installed CPU backup when GPU speech fails; smaller-model fallback can change accuracy. GPU preferred requires verified GPU allocation. Test setup reports speed on a bundled synthetic English sample, not a multilingual accuracy score. Pause translation and unload AI before component tests or file changes.
+
+Component downloads can resume and require pinned checksums before activation. Repair restores the previous managed version on failure. Change location copies and verifies managed files before committing the new location; cards, recordings and external model files stay where they were. Review each model license before use; NLLB weights use CC-BY-NC-4.0.

@@ -19,6 +19,9 @@ QLabel#hint, QLabel#phonetic, QLabel#learningCaption, QLabel#contextPreview {{ c
 QLabel#section {{ color: {muted}; font-size: 12px; font-weight: 600; padding: 8px 0 3px; }}
 QLabel#status {{ color: {muted}; font-size: 12px; }}
 QWidget#replySuggestions {{ border: none; border-top: 1px solid {line}; background: transparent; }}
+QFrame#modelRoleCard, QFrame#componentCard {{ background: {surface}; border: 1px solid {line}; border-radius: 12px; }}
+QPushButton#componentSelect {{ text-align: left; border: none; background: transparent; padding: 6px 8px; }}
+QPushButton#componentSelect:hover, QPushButton#componentSelect:checked {{ background: {wash}; color: {accent}; }}
 QFrame#replyOption {{ background: {surface}; border: 1px solid {line}; border-radius: 10px; }}
 QLabel#saveNotice {{ background: {wash}; color: {accent}; border: 1px solid {line}; border-radius: 9px; padding: 10px 16px; }}
 QLabel#badge {{ color: {accent}; background: {wash}; padding: 3px 8px; border-radius: 5px; font-size: 11px; }}

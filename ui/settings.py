@@ -4,13 +4,14 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Slot, Signal, QSignalBlocker
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QSpinBox, QDoubleSpinBox, QTabWidget, QVBoxLayout, QWidget, QListWidget, QSizePolicy)
+    QScrollArea, QStackedWidget, QFrame, QSpinBox, QDoubleSpinBox, QTabWidget, QVBoxLayout, QWidget, QListWidget, QSizePolicy)
 from audio.capture import list_audio_sources
 from core.config import AppConfig, TargetLanguage, QualityMode, LANGUAGE_LABELS, SOURCE_LANGUAGE_LABELS, QUALITY_LABELS
 from core.events import EventBus
 from ui.components import NoiseGateEditor
 from ui.performance import LivePerformance, BenchmarkResults
 from ui.theme import style_for
+from ui.icons import icon_button
 
 
 class SettingsContent:
@@ -158,7 +159,7 @@ class SettingsContent:
         layout.addLayout(form)
         mode_hint=QLabel();self._mode_hint=mode_hint;mode_hint.setWordWrap(True);mode_hint.setObjectName('hint')
         descriptions={'fast':'Immediate NLLB translation. Lowest model overhead.',
-            'context':'Qwen translates using up to three earlier original sentences. Uses your GPU; falls back to NLLB if unavailable. Stop live subtitles before manual local analysis.',
+            'context':'Qwen translates using up to three earlier original sentences. Uses the selected CPU/GPU setup; an installed NLLB model is the fallback. Stop live subtitles before manual local analysis.',
             'review':'NLLB subtitles appear immediately. Qwen reviews completed original sentences in the background. Refinements update automatically; open sentence details to compare versions. Transcripts are never changed automatically.'}
         self._translation_mode.currentIndexChanged.connect(lambda:mode_hint.setText(descriptions[self._translation_mode.currentData()]))
         mode_hint.setText(descriptions[self._translation_mode.currentData()]);layout.addWidget(mode_hint)
@@ -238,14 +239,25 @@ class SettingsContent:
         subpages = QTabWidget();self.model_tabs=subpages
         outer.addWidget(subpages)
         configuration = QWidget()
-        layout = QVBoxLayout(configuration)
-        subpages.addTab(configuration,'Configuration' if self.embedded else 'Models')
+        configuration_box = QVBoxLayout(configuration)
+        configuration_box.setContentsMargins(0,0,0,0)
+        # Construct the two pages with their real parents. Moving raw layout items
+        # later leaves controls behind an empty sibling that intercepts input.
+        self.component_stack=QStackedWidget(configuration)
+        self._models_normal=QWidget(self.component_stack)
+        self._models_normal.setObjectName('modelsOverview')
+        layout=QVBoxLayout(self._models_normal)
+        layout.setContentsMargins(0,0,0,0);layout.setSpacing(12)
+        self.component_stack.addWidget(self._models_normal)
+        configuration_box.addWidget(self.component_stack)
+        subpages.addTab(configuration,'Models')
+        subpages.tabBar().hide()
         self._quality = QComboBox()
         for mode,label in QUALITY_LABELS.items():
             self._quality.addItem(label,mode.value)
         self._backend = QComboBox()
         self._backend.addItem('CPU - available', 'cpu')
-        self._backend.addItem('Radeon / Vulkan - requires local server and model', 'vulkan')
+        self._backend.addItem('GPU / Vulkan - requires local server and model', 'vulkan')
         self._threads, self._mt_threads = QSpinBox(), QSpinBox()
         self._threads.setRange(1,16)
         self._mt_threads.setRange(1,8)
@@ -257,14 +269,18 @@ class SettingsContent:
         self._preset_help.setObjectName('hint')
         self._quality.currentIndexChanged.connect(self._describe_preset)
         form = QFormLayout()
-        form.addRow('Speech recognition',self._backend)
-        form.addRow('Translation',self._translation_mode)
+        self._processing=QComboBox()
+        for text,value in [('Automatic','auto'),('CPU only','cpu'),('GPU preferred','gpu'),('Keep current setup','legacy')]:self._processing.addItem(text,value)
+        self._speech_choice=QComboBox();self._speech_choice.addItem('Current / custom model','external');self._speech_choice.addItem('Whisper base · CPU','speech-cpu');self._speech_choice.addItem('Whisper large-v3-turbo','speech-turbo')
+        self._learning_choice=QComboBox();self._learning_choice.addItem('Current / custom model','external');self._learning_choice.addItem('Qwen3 4B · shared local AI','qwen')
+        form.addRow('Processing',self._processing)
+        form.setVerticalSpacing(12);form.setHorizontalSpacing(14)
         self._selected_models=QLabel();self._selected_models.setWordWrap(True)
         self._selected_models.setTextFormat(Qt.TextFormat.PlainText)
         self._runtime_models=QLabel('Running: waiting for live status')
         self._runtime_models.setWordWrap(True)
         self._runtime_models.setTextFormat(Qt.TextFormat.PlainText)
-        advanced_form=QFormLayout();advanced_form.addRow('Quality preset',self._quality)
+        advanced_form=QFormLayout();advanced_form.addRow('Legacy speech engine',self._backend);advanced_form.addRow('Decoding effort',self._quality)
         advanced_form.addRow('Speech CPU threads',self._threads)
         advanced_form.addRow('Translation CPU threads',self._mt_threads)
         self._gpu_setup = QWidget()
@@ -277,22 +293,40 @@ class SettingsContent:
         self._exe.textChanged.connect(self._backend_visibility)
         self._gpu_model.textChanged.connect(self._backend_visibility)
         layout.addLayout(form)
+        self._role_status={}
+        self._role_detail={}
+        for key,heading,control,caption,icon in (
+            ('speech','Speech recognition',self._speech_choice,'Multilingual transcription','audio'),
+            ('translation','Translation',self._translation_mode,'Choose fast CPU or contextual local AI','route'),
+            ('learning','Learning assistant',self._learning_choice,'Word explanations and replies · on demand','sparkles')):
+            section=QFrame();section.setObjectName('modelRoleCard')
+            section_box=QHBoxLayout(section);section_box.setContentsMargins(14,12,14,12);section_box.setSpacing(12)
+            symbol=icon_button(icon,heading,section);symbol.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents);symbol.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            section_box.addWidget(symbol,0,Qt.AlignmentFlag.AlignTop)
+            body=QVBoxLayout();body.setSpacing(6);header=QHBoxLayout()
+            title=QLabel(heading);title.setObjectName('field');header.addWidget(title,1)
+            status=QLabel('Not loaded' if key=='speech' else 'On demand');status.setObjectName('badge');header.addWidget(status)
+            self._role_status[key]=status;body.addLayout(header);body.addWidget(control)
+            detail=QLabel(caption);detail.setObjectName('hint');detail.setWordWrap(True)
+            self._role_detail[key]=detail;body.addWidget(detail);section_box.addLayout(body,1);layout.addWidget(section)
         self._selected_models.setObjectName('contextPreview');self._runtime_models.setObjectName('contextPreview')
-        layout.addWidget(self._selected_models)
-        layout.addWidget(self._runtime_models)
-        layout.addWidget(self._preset_help)
-        layout.addWidget(self._mode_hint)
+        shared=QLabel('One Qwen download powers contextual translation and learning.');shared.setObjectName('hint');shared.setWordWrap(True);layout.addWidget(shared)
+        self._model_help_placeholder=self._preset_help
         self._model_advanced=QWidget()
         self._model_advanced_layout=QVBoxLayout(self._model_advanced)
         self._model_advanced_layout.addLayout(advanced_form)
-        advanced_toggle=QPushButton('Advanced');advanced_toggle.setCheckable(True)
+        advanced_toggle=QPushButton('Advanced');advanced_toggle.setObjectName('secondary');advanced_toggle.setCheckable(True)
         advanced_toggle.toggled.connect(self._model_advanced.setVisible)
         layout.addWidget(advanced_toggle);layout.addWidget(self._model_advanced)
         self._model_advanced.hide()
-        hint = QLabel('GPU mode keeps the server loaded and verifies Vulkan allocation at startup. NLLB translation uses CPU; Qwen translation uses the local GPU model. With Vulkan, the selected GGML file determines model size; presets control decoding effort. GPU utilization and VRAM are shown when Windows performance counters are available.')
+        hint = QLabel('GPU mode keeps the server loaded and verifies Vulkan allocation at startup. NLLB translation uses CPU; Qwen translation uses its selected CPU/GPU runtime. With Vulkan, the selected GGML file determines model size; presets control decoding effort. GPU utilization and VRAM are shown when Windows performance counters are available.')
         hint.setObjectName('hint')
         hint.setWordWrap(True)
         self._model_advanced_layout.addWidget(hint)
+        self._model_advanced_layout.addWidget(self._selected_models)
+        self._model_advanced_layout.addWidget(self._runtime_models)
+        self._model_advanced_layout.addWidget(self._preset_help)
+        self._model_advanced_layout.addWidget(self._mode_hint)
         installed=QPushButton('Use installed GPU speech model')
         def select_installed():
             from core.speech_assets import installed_paths
@@ -304,7 +338,17 @@ class SettingsContent:
             else:
                 self._feedback.setText('GPU speech assets are not installed. See the local speech setup instructions in README.')
         installed.clicked.connect(select_installed)
-        layout.insertWidget(1,installed,0,Qt.AlignmentFlag.AlignLeft)
+        self._model_advanced_layout.addWidget(installed)
+        from ui.model_setup import ComponentsWidget,TaskWidget,SetupDialog
+        self.component_manager=ComponentsWidget(self._config,self._events,self.component_stack)
+        self.component_stack.addWidget(self.component_manager);self.component_stack.setCurrentIndex(0)
+        self.component_manager.back.clicked.connect(lambda:self._show_components(False))
+        actions=QHBoxLayout();self.manage_components=QPushButton('Manage components');self.setup_assistant=QPushButton('Setup assistant');self.test_setup=QPushButton('Test setup')
+        for button in (self.manage_components,self.test_setup,self.setup_assistant):actions.addWidget(button)
+        layout.addLayout(actions)
+        self.manage_components.clicked.connect(lambda:self._show_components(True));self.setup_assistant.clicked.connect(self._open_setup_assistant);self.test_setup.clicked.connect(self._test_selected_setup)
+        self.model_task=TaskWidget(self._events,self);self.model_task.task_footer(layout)
+        for control in (self._processing,self._speech_choice,self._learning_choice):control.currentIndexChanged.connect(self._describe_preset)
         self._translation_mode.currentIndexChanged.connect(self._describe_preset)
         layout.addStretch()
         monitor = QWidget()
@@ -333,8 +377,38 @@ class SettingsContent:
         self._retry.clicked.connect(self._events.retry_requested.emit)
         layout.addWidget(self._retry)
 
+    def _show_components(self,opened):
+        self.component_stack.setCurrentIndex(1 if opened else 0)
+        if opened:self.component_manager.refresh()
+
+    def _open_setup_assistant(self):
+        from ui.model_setup import SetupDialog
+        if not self.model_task.can_modify():return
+        self._setup_dialog=SetupDialog(self._config,self._events,self)
+        self._setup_dialog.setStyleSheet(style_for(self._config.theme))
+        self._setup_dialog.accepted.connect(self._setup_applied);self._setup_dialog.open()
+
+    def _setup_applied(self):
+        c=self._config
+        for control,value in ((self._processing,c.processing_mode),(self._speech_choice,c.speech_model_id),(self._learning_choice,c.learning_model_id),(self._backend,c.backend)):
+            control.setCurrentIndex(max(0,control.findData(value)))
+        self._exe.setText(c.vulkan_executable);self._gpu_model.setText(c.vulkan_model)
+        self._translation_mode.setCurrentIndex(self._translation_mode.findData(c.translation_mode));self._translation.setChecked(c.translation_enabled);self.analysis_settings.enabled.setChecked(c.analysis_enabled)
+        self._events.state_changed.emit(c.snapshot());self._describe_preset()
+
+    def _test_selected_setup(self):
+        from core.setup import test_configuration
+        try:draft=self._draft()
+        except ValueError as exc:self.model_task.status.setText(str(exc));return
+        def done(result):
+            if 'value' in result:
+                r=result['value'];self.model_task.status.setText(f"{r['backend']} · {r['speech_ms']:.0f} ms for {r['audio_seconds']:.1f}s audio · translation {r.get('translation_ms',0):.0f} ms · {r['memory_mb']:.0f} MB app/worker memory. "+('Keeps up with this sample.' if r['keeps_up'] else 'May not keep up; consider a smaller model.')+' Compatibility/speed test, not an accuracy score.')
+        self.model_task.start_job(lambda progress,cancelled:test_configuration(draft,progress,cancelled),done)
+
     def _load_values(self):
         c = self._config
+        for control,value in ((self._processing,c.processing_mode),(self._speech_choice,c.speech_model_id),(self._learning_choice,c.learning_model_id)):
+            control.setCurrentIndex(max(0,control.findData(value)))
         for widget,value in ((self._device,c.audio_device_id),(self._source,c.source_language),
             (self._target,c.target_language.value),(self._quality,c.quality_mode.value),
             (self._backend,c.backend),(self._position,c.overlay_position)):
@@ -353,7 +427,7 @@ class SettingsContent:
     def _backend_visibility(self):
         self._gpu_setup.setVisible(self._backend.currentData() == "vulkan")
         ready = Path(self._exe.text()).is_file() and Path(self._gpu_model.text()).is_file()
-        self._backend.setItemText(1, "Radeon / Vulkan" if ready else "Radeon / Vulkan · setup required")
+        self._backend.setItemText(1, "GPU / Vulkan" if ready else "GPU / Vulkan · setup required")
         self._describe_preset()
 
     def _model_metrics(self, data):
@@ -363,25 +437,44 @@ class SettingsContent:
         model=data.get('model','')
         self._runtime_models.setText('Running speech: '+engine+(' · '+model if model else '')+
             '\nLocal AI: '+str(data.get('analysis_status','Unloaded')))
+        self._role_status['speech'].setText(engine)
+        self._role_status['speech'].setToolTip('Currently running: '+engine+(' · '+model if model else ''))
+        ai_status=str(data.get('analysis_status','Unloaded'))
+        self._role_status['learning'].setText('Loaded' if 'loaded' in ai_status.lower() and 'unloaded' not in ai_status.lower() else 'On demand')
+        self._role_status['learning'].setToolTip(ai_status)
 
     def _describe_preset(self):
         if not hasattr(self,'_selected_models'):
             return
         gpu=self._backend.currentData()=='vulkan'
-        model=Path(self._gpu_model.text()).name if gpu else ('small' if self._quality.currentData()=='accurate' else 'base')
-        ready=not gpu or (Path(self._exe.text()).is_file() and Path(self._gpu_model.text()).is_file())
+        selected=self._speech_choice.currentData() if hasattr(self,'_speech_choice') else 'external'
+        model=({'speech-cpu':'Whisper base','speech-turbo':'Whisper large-v3-turbo'}.get(selected) or Path(self._gpu_model.text()).name) if gpu else ('small' if self._quality.currentData()=='accurate' else 'base')
+        if selected=='speech-cpu':model='Whisper base';gpu=False
+        elif selected=='speech-turbo':model='Whisper large-v3-turbo';gpu=self._processing.currentData()!='cpu'
+        from core.components import resolve
+        ready=bool(resolve('speech-runtime') and resolve('speech-turbo')) if selected=='speech-turbo' else bool(resolve('speech-cpu')) if selected=='speech-cpu' else (not gpu or (Path(self._exe.text()).is_file() and Path(self._gpu_model.text()).is_file()))
         mode=self._translation_mode.currentData()
         from core.local_assets import managed_paths
         exe,gguf=managed_paths()
         if hasattr(self,'analysis_settings'):
             exe=Path(self.analysis_settings.exe.text().strip() or str(exe))
             gguf=Path(self.analysis_settings.gguf.text().strip() or str(gguf))
+        if self._learning_choice.currentData()=='qwen':
+            gguf=resolve('qwen') or Path('missing-model.gguf')
+            exe=(resolve('ai-cpu') if self._processing.currentData()=='cpu' else resolve('ai-vulkan') or resolve('ai-cpu')) or Path('missing-runtime.exe')
         ai_ready=exe.is_file() and gguf.is_file()
         self._selected_models.setText('Selected speech: '+(model or 'Choose a model')+
-            (' · Radeon GPU' if gpu else ' · CPU')+('' if ready else ' · Files missing')+
-            '\nTranslation: '+('Local Qwen · GPU (NLLB fallback)' if mode=='context' else 'NLLB · CPU')+
-            '\nRefinement: '+('Off' if mode!='review' else gguf.name+' · GPU')+
+            (' · GPU preferred' if gpu else ' · CPU')+('' if ready else ' · Files missing')+
+            '\nTranslation: '+('Local Qwen · '+self._processing.currentText() if mode=='context' else 'NLLB · CPU')+
+            '\nLearning: '+('Shared Qwen model' if self._learning_choice.currentData()=='qwen' else gguf.name)+
             ('\nLocal AI files missing — choose them in Advanced.' if mode in ('context','review') and not ai_ready else ''))
+        if hasattr(self,'_role_detail'):
+            self._role_detail['speech'].setText((model or 'Current model')+' · '+('GPU preferred' if gpu else 'CPU')+('' if ready else ' · install required'))
+            self._role_detail['translation'].setText('Shared Qwen model · contextual translation' if mode=='context' else 'NLLB · CPU'+(' · AI review' if mode=='review' else ''))
+            self._role_status['translation'].setText('Shared model' if mode=='context' else 'CPU')
+            self._role_detail['learning'].setText((gguf.name if self._learning_choice.currentData()=='external' else 'Qwen3 4B')+' · explanations and replies on demand')
+        if selected!='external':
+            self._preset_help.setText('The selected model stays unchanged. Decoding effort changes how much inference work is done. Save changes to apply.');return
         if gpu:
             self._preset_help.setText('The selected GPU file determines the speech model. Quality changes decoding effort, not model size. Changes take effect after Apply.')
             return
@@ -406,13 +499,29 @@ class SettingsContent:
         c.source_language = self._source.currentData()
         c.target_language = TargetLanguage(self._target.currentData())
         c.quality_mode = QualityMode(self._quality.currentData())
-        c.apply_quality()
         c.backend = self._backend.currentData()
+        c.processing_mode=self._processing.currentData();c.speech_model_id=self._speech_choice.currentData();c.learning_model_id=self._learning_choice.currentData()
+        c.apply_quality()
         c.cpu_threads, c.translation_threads = self._threads.value(),self._mt_threads.value()
         c.vulkan_executable,c.vulkan_model = self._exe.text().strip(),self._gpu_model.text().strip()
         c.saved_audio_limit_mb=self.storage.audio_limit.currentData() or 250
         self.appearance.apply_to(c)
         self.analysis_settings.apply_to(c)
+        from core.components import resolve
+        if c.speech_model_id=='speech-cpu':
+            c.backend='cpu'
+            if validate and not resolve('speech-cpu'):raise ValueError('Install the selected CPU speech model in Manage components first.')
+        elif c.speech_model_id=='speech-turbo':
+            c.backend='cpu' if c.processing_mode=='cpu' else 'vulkan'
+            runtime,model=resolve('speech-runtime'),resolve('speech-turbo')
+            if runtime:c.vulkan_executable=str(runtime)
+            if model:c.vulkan_model=str(model)
+            if validate and (not runtime or not model):raise ValueError('Install the selected speech model and runtime in Manage components first.')
+        if validate and c.learning_model_id=='qwen':
+            if not resolve('qwen') or not (resolve('ai-cpu') if c.processing_mode=='cpu' else resolve('ai-vulkan') or (resolve('ai-cpu') if c.processing_mode=='auto' else None)):raise ValueError('Install the selected local AI model and matching runtime first.')
+        if validate:
+            from core.setup import validate_selection
+            validate_selection(c)
         if validate and c.backend == 'vulkan' and (not Path(c.vulkan_executable).is_file() or not Path(c.vulkan_model).is_file()):
             raise ValueError('Select an existing Vulkan whisper-server executable and GGML model first, or choose CPU.')
         return c
@@ -476,6 +585,8 @@ class SettingsContent:
             self.analysis_settings.service.status_changed.disconnect(self._analysis_status)
             self.analysis_settings.service.progress_changed.disconnect(self._analysis_progress)
         self.analysis_settings.dispose()
+        self.model_task.dispose();self.component_manager.dispose()
+        if getattr(self,'_setup_dialog',None):self._setup_dialog.reject()
         self.storage.set_active(False)
         for signal,slot in ((self._events.metrics_changed,self._model_metrics),
             (self._events.audio_level_changed,self._on_audio_level),
@@ -510,6 +621,9 @@ class SettingsPage(SettingsContent,QWidget):
         for field in fields(draft):
             if getattr(draft,field.name)!=getattr(baseline,field.name):setattr(merged,field.name,getattr(draft,field.name))
         if self._gate_dirty:merged.noise_threshold=self._gate.meter.threshold/100
+        if validate:
+            from core.setup import validate_selection
+            validate_selection(merged)
         if validate and merged.backend=='vulkan' and (not Path(merged.vulkan_executable).is_file() or not Path(merged.vulkan_model).is_file()):
             raise ValueError('Choose existing GPU speech files in Models, or choose CPU.')
         return merged

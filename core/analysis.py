@@ -87,6 +87,11 @@ class AnalysisService(QObject):
     def busy(self):
         return self.worker is not None
 
+    @staticmethod
+    def _components_busy():
+        from ui.model_setup import active_jobs
+        return bool(active_jobs())
+
     def _status(self,message):
         self.status_changed.emit(message)
         if self.events:
@@ -94,7 +99,7 @@ class AnalysisService(QObject):
             self.events.activity_changed.emit(message)
 
     def request(self,token,config,payload):
-        if self.busy or self.closing or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned'))):
+        if self.busy or self.closing or self._components_busy() or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned'))):
             return False
         payload=analysis_input(payload)
         from pathlib import Path
@@ -111,13 +116,13 @@ class AnalysisService(QObject):
         return True
 
     def manage(self,operation,config):
-        if self.busy or self.closing or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned'))) or operation not in ('install','load','unload'):
+        if self.busy or self.closing or self._components_busy() or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned'))) or operation not in ('install','load','unload'):
             return False
         self._start(config,{},operation)
         return True
 
     def explain(self,token,config,payload):
-        if self.busy or self.closing or (self.events and any(self.events.property(p) for p in ('review_busy','local_translation_owned','benchmark_busy'))):
+        if self.busy or self.closing or self._components_busy() or (self.events and any(self.events.property(p) for p in ('review_busy','local_translation_owned','benchmark_busy'))):
             return False
         from ml.phrase_explanation import explanation_input
         refresh=bool(payload.get('refresh'))
@@ -136,7 +141,7 @@ class AnalysisService(QObject):
         return True
 
     def suggest_replies(self,token,config,payload):
-        if self.busy or self.closing or (self.events and any(self.events.property(p) for p in ('review_busy','local_translation_owned','benchmark_busy'))):return False
+        if self.busy or self.closing or self._components_busy() or (self.events and any(self.events.property(p) for p in ('review_busy','local_translation_owned','benchmark_busy'))):return False
         from ml.reply_suggestions import reply_input
         from pathlib import Path
         payload=reply_input(payload)
@@ -153,14 +158,14 @@ class AnalysisService(QObject):
         return True
 
     def refine(self,token,config,payload):
-        if self.busy or self.closing or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned') or self.events.property('benchmark_busy'))):
+        if self.busy or self.closing or self._components_busy() or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned') or self.events.property('benchmark_busy'))):
             return False
         self.token=token
         self._start(replace(config,analysis_provider='local'),payload,'refine',token)
         return True
 
     def compare(self,token,config,payload):
-        if self.busy or self.closing or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned'))):
+        if self.busy or self.closing or self._components_busy() or (self.events and (self.events.property('review_busy') or self.events.property('local_translation_owned'))):
             return False
         allowed=getattr(self.events,'comparison_allowed',lambda:True)
         if not allowed():
@@ -179,7 +184,7 @@ class AnalysisService(QObject):
         self.worker.progress.connect(self._status)
         self.worker.download_progress.connect(self.progress_changed)
         self.worker.finished.connect(self._finished)
-        self._status({'install':'Downloading local AI assets','load':'Loading local GPU model',
+        self._status({'install':'Downloading local AI assets','load':'Loading local AI model',
             'unload':'Unloading local model','compare':'Local translator comparison','refine':'Reviewing completed translation locally','explain':'Explaining selected phrase locally',
             'reply':'Suggesting short replies locally','analyze':'Local GPU analysis' if config.analysis_provider=='local' else 'Online analysis'}[operation])
         self.worker.start()

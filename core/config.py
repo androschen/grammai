@@ -58,11 +58,7 @@ LANGUAGE_HUD: dict[str, str] = {
 
 @dataclass
 class AppConfig:
-    """Tuned for Ryzen 7 5700X + Radeon RX 7700 XT on Windows.
-
-    faster-whisper runs on CPU with int8: CTranslate2 has no stable
-    ROCm/DirectML path for this AMD GPU on Windows.
-    """
+    """User preferences; runtime capability checks are independent of GPU vendor."""
 
     model_size: str = "base"
     device: str = "cpu"
@@ -90,6 +86,12 @@ class AppConfig:
     translation_enabled: bool = True
     translation_threads: int = 2
     translation_beam_size: int = 2
+    processing_mode: str = "legacy"  # preserve existing installations until explicitly changed
+    speech_model_id: str = "external"
+    learning_model_id: str = "external"
+    translation_model_id: str = "external"
+    gpu_device: str = ""
+    setup_completed: bool = False
     backend: str = "cpu"
     vulkan_executable: str = ""
     vulkan_model: str = ""
@@ -127,6 +129,8 @@ class AppConfig:
     analysis_examples: str = "[]"
 
     def apply_quality(self) -> None:
+        selected=self.speech_model_id!='external'
+        previous_model=self.model_size
         if self.quality_mode is QualityMode.ACCURATE:
             self.model_size = "small"
             self.beam_size = 5
@@ -139,6 +143,8 @@ class AppConfig:
             self.model_size = "base"
             self.beam_size = 1
             self.translation_beam_size = 1
+
+        if selected:self.model_size=previous_model
 
     def snapshot(self) -> AppState:
         return AppState(
@@ -156,7 +162,7 @@ class AppConfig:
                            self.speech_detection,self.speech_max_seconds,self.speech_silence_seconds,
                            self.speech_overlap_seconds,self.speech_prompt,self.translation_mode,
                            self.analysis_executable,self.analysis_gguf,self.analysis_context_tokens,
-                           self.analysis_context_sentences),
+                           self.analysis_context_sentences,self.processing_mode,self.speech_model_id,self.learning_model_id,self.translation_model_id,self.gpu_device),
         )
 
     @property

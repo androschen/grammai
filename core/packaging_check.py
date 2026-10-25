@@ -20,6 +20,7 @@ def smoke_check(report,verify_models=False):
         from core.local_assets import managed_paths
         from core.speech_assets import installed_paths
         from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt
         results['imports']='ok'
         results['chinese_pronunciation']=bool(phonetics_auto('\u4f60\u597d'))
         results['thai_pronunciation']=bool(phonetics_auto('\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35'))
@@ -48,7 +49,33 @@ def smoke_check(report,verify_models=False):
         from ui.settings import SettingsDialog
         settings=SettingsDialog(AppConfig(),events)
         assert settings._translation_mode.count()==3
+        settings.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
+        settings.tabs.setCurrentIndex(3);settings.resize(1000,850);settings.show();QApplication.processEvents()
+        for control in (settings._processing,settings._speech_choice,settings._translation_mode,settings._learning_choice,settings.manage_components,settings.test_setup,settings.setup_assistant):
+            assert settings._models_normal.isAncestorOf(control), 'Models control has the wrong parent'
+            assert control.isVisible(), 'Models control is hidden'
+            point=control.mapTo(settings,control.rect().center())
+            assert settings.childAt(point) is control, 'Another widget blocks Models input'
+        settings._show_components(True);QApplication.processEvents()
+        assert not settings._processing.isVisible() and settings.component_manager.isVisible()
+        assert len(settings.component_manager.cards)==7
+        settings._show_components(False);QApplication.processEvents()
+        assert settings._processing.isVisible()
+        results['models_input_routing']='ok'
         settings.reject();settings.deleteLater();results['translation_settings']='ok'
+        from core.components import catalog
+        assert {'speech-cpu','speech-turbo','qwen','ai-cpu','ai-vulkan','translation-fast'}<=set(catalog())
+        results['component_catalog']='ok'
+        from ui.model_setup import SetupDialog,active_jobs
+        from PySide6.QtTest import QTest
+        setup=SetupDialog(AppConfig());setup.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
+        for _ in range(1500):
+            if not active_jobs():break
+            QTest.qWait(10)
+        assert not active_jobs(),'Setup hardware check did not finish'
+        assert not setup.finish.isEnabled() and setup.pages.count()==3
+        setup.reject();setup.deleteLater();results['setup_wizard']='ok'
+
         from ui.deck import LearningDeckDialog
         from core.phrasebook import Phrasebook
         from core.preferences import data_dir

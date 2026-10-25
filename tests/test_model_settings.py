@@ -29,7 +29,7 @@ class ModelSettingsTests(unittest.TestCase):
         self.assertIn('Files missing',d._selected_models.text())
         d._model_metrics({'kind':'live','backend':'CPU / int8','model':'small','analysis_status':'Unloaded'})
         self.assertIn('CPU / int8',d._runtime_models.text())
-        self.assertIn('Radeon GPU',d._selected_models.text())
+        self.assertIn('GPU preferred',d._selected_models.text());self.assertNotIn('Radeon GPU',d._selected_models.text())
     def test_draft_and_live_status_never_apply_pending_selection(self):
         d=self.dialog
         d._translation_mode.setCurrentIndex(d._translation_mode.findData('review'))

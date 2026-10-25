@@ -108,12 +108,14 @@ class NllbTranslator:
         self._notify("Translator ready.")
 
     def _resolve_model_dir(self) -> Path:
+        from core.components import resolve
+        managed=resolve('translation-fast')
+        if managed:return managed.parent
         cache = Path.home() / ".grammai" / "models" / "nllb-200-distilled-600M-int8"
         if _looks_like_ct2(cache):
             return cache
         cache.mkdir(parents=True, exist_ok=True)
-        self._notify("Downloading NLLB model (one-time)…")
-        return self._download_preconverted(cache)
+        raise ValueError('Fast translation model is missing. Install NLLB in Models > Manage components; downloads require an explicit setup action.')
 
     def _download_preconverted(self, dest: Path) -> Path:
         from huggingface_hub import snapshot_download

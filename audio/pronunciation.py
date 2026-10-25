@@ -1,6 +1,20 @@
 """On-demand, offline Windows pronunciation with language-matched native voices."""
-from PySide6.QtCore import QObject, Signal, QTimer
+import atexit,weakref
+from PySide6.QtCore import QObject, Signal, QTimer, QCoreApplication, QEvent
 from PySide6.QtTextToSpeech import QTextToSpeech
+
+_SERVICES=weakref.WeakSet()
+
+
+def _close_speech_services():
+    for service in list(_SERVICES):
+        try:service.dispose()
+        except RuntimeError:pass
+    app=QCoreApplication.instance()
+    if app is not None:QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+
+
+atexit.register(_close_speech_services)
 
 LANGUAGES = {'en': 'English', 'zh': 'Chinese', 'th': 'Thai', 'id': 'Indonesian'}
 
@@ -16,6 +30,9 @@ class PronunciationService(QObject):
     def __init__(self, events, parent=None, engine_factory=None, engines=None):
         super().__init__(parent or events)
         self.events = events
+        self._disposed=False;_SERVICES.add(self)
+        app=QCoreApplication.instance()
+        if app is not None:app.aboutToQuit.connect(self.dispose)
         self._factory = engine_factory or (lambda name: QTextToSpeech(name, self))
         self._names = engines
         self._loaded = False
@@ -28,6 +45,7 @@ class PronunciationService(QObject):
         events.replay_clear_requested.connect(self.stop)
 
     def refresh(self):
+        if self._disposed:return
         self.stop()
         for engine in self._engines:
             engine.deleteLater()
@@ -44,15 +62,28 @@ class PronunciationService(QObject):
                 engine.stateChanged.connect(lambda state, e=engine: self._state(e, state))
                 if engine.state() == QTextToSpeech.State.Error:
                     continue
-                for voice in engine.availableVoices():
-                    locale = voice.locale().name().replace('_', '-')
-                    code = language_code(locale)
-                    if code not in LANGUAGES or (code == 'zh' and locale in ('zh-HK', 'zh-MO')):
+                # Qt returns voices for the current locale, not every installed language.
+                # Visit supported locales explicitly; never fall back to the default voice.
+                for available_locale in engine.availableLocales():
+                    locale_name = available_locale.name().replace('_', '-')
+                    code = language_code(locale_name)
+                    if code not in LANGUAGES or (code == 'zh' and locale_name in ('zh-HK', 'zh-MO')):
                         continue
-                    self._voices.setdefault(code, (engine, voice))
+                    engine.setLocale(available_locale)
+                    for voice in engine.availableVoices():
+                        voice_locale = voice.locale().name().replace('_', '-')
+                        if language_code(voice_locale) != code or (code == 'zh' and voice_locale in ('zh-HK', 'zh-MO')):
+                            continue
+                        self._voices.setdefault(code, (engine, voice))
+                # Prefer one complete modern Windows voice inventory. Loading an
+                # unused legacy SAPI engine adds native COM lifetime hazards.
+                if name=='winrt' and self._voices:break
             except (RuntimeError, OSError):
                 continue
         self._loaded = True
+        # Native speech plugins register shutdown hooks when first loaded. Dispose
+        # their engines before those plugin hooks tear down the native backend.
+        atexit.unregister(_close_speech_services);atexit.register(_close_speech_services)
         self.voices_changed.emit()
 
     def voice(self, language):
@@ -77,6 +108,7 @@ class PronunciationService(QObject):
         self.events.replay_requested.emit('', 1.)
         engine, voice = selected
         try:
+            engine.setLocale(voice.locale())
             engine.setVoice(voice)
             engine.setRate(-.2 if speed < 1. else 0.)
             engine.setVolume(1.)
@@ -130,6 +162,17 @@ class PronunciationService(QObject):
             self.events.playback_started.emit('')
             generation = self._generation
             QTimer.singleShot(200, self, lambda: self._release_capture(generation))
+
+    def dispose(self):
+        if self._disposed:return
+        self._disposed=True;self.stop()
+        for engine in self._engines:
+            try:engine.stop();engine.deleteLater()
+            except RuntimeError:pass
+        self._engines=[];self._voices={};self._loaded=True
+        try:self.events.replay_clear_requested.disconnect(self.stop)
+        except (RuntimeError,TypeError):pass
+        _SERVICES.discard(self)
 
     def _release_capture(self, generation):
         if generation == self._generation and not self._key and not self.events.property('replay_active'):

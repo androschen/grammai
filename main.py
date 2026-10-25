@@ -90,6 +90,7 @@ class GrammAIApp:
     def _on_subtitles_toggled(self, enabled: bool) -> None:
         if enabled and not self._translation_enabled:
             self._panel._history.begin_context()
+        self._events.setProperty('translation_running',enabled)
         self._translation_enabled = enabled
         self._panel.set_subtitles_on(enabled)
         if enabled:
@@ -182,11 +183,14 @@ class GrammAIApp:
         self._update_overlay_visibility()
 
     def _inference_failed(self) -> None:
+        self._events.setProperty('translation_running',False)
         self._translation_enabled = False
         self._panel.set_subtitles_on(False)
         self._overlay.hide()
 
     def shutdown(self) -> None:
+        from ui.model_setup import cancel_jobs
+        cancel_jobs()
         self._live_review.close()
         if self._phrase_dialog is not None:
             self._phrase_dialog.close()
@@ -194,7 +198,7 @@ class GrammAIApp:
         self._analysis.shutdown()
         self._player.stop()
         speech=getattr(self._events,'pronunciation_service',None)
-        if speech is not None:speech.stop()
+        if speech is not None:speech.dispose()
         self._preference_timer.stop()
         self._save_preferences()
         self._monitor.timer.stop()
@@ -204,6 +208,9 @@ class GrammAIApp:
         self._pipeline.stop()
 
     def _finish_shutdown(self) -> None:
+        from ui.model_setup import active_jobs
+        if active_jobs():
+            self._panel.set_status('Finishing component tasks safely…');QTimer.singleShot(100,self._finish_shutdown);return
         self._pipeline_finished = True
         if self._analysis.busy:
             self._panel.set_status('Waiting for the analysis connection to finish...')
@@ -274,6 +281,11 @@ def main() -> int:
     from core.paths import register_existing_models
     register_existing_models()
 
+    if not config.setup_completed:
+        from ui.model_setup import SetupDialog
+        from ui.theme import style_for
+        setup=SetupDialog(config);setup.setStyleSheet(style_for(config.theme))
+        if setup.exec()!=setup.DialogCode.Accepted:return 0
     window = GrammAIApp(config)
     instance.on_activate(window._panel.reveal)
     if args.model:

@@ -26,7 +26,7 @@ class VulkanWhisper:
     def gpu_allocated(log):
         return bool(re.search(r'Vulkan\d+.*(?:total size|buffer size|model buffer)',log,re.I))
 
-    def start(self):
+    def start(self,cpu_only=False,cancelled=lambda:False):
         exe, model = Path(self.config.vulkan_executable), Path(self.config.vulkan_model)
         if not exe.is_file() or not model.is_file():
             raise RuntimeError("Choose a Vulkan whisper-server executable and GGML model in Performance settings.")
@@ -36,10 +36,15 @@ class VulkanWhisper:
         prefix='/'+secrets.token_hex(16)
         self.url = f"http://127.0.0.1:{port}"+prefix
         self.log = tempfile.TemporaryFile(mode="w+b",buffering=0)
-        self.process = subprocess.Popen(
-            [str(exe.resolve()), "--host", "127.0.0.1", "--port", str(port),
+        command=[str(exe.resolve()), "--host", "127.0.0.1", "--port", str(port),
              "-m", str(model.resolve()), "-t", str(self.config.cpu_threads),
-             "-bs", str(self.config.beam_size), "-l", "auto",'--request-path',prefix],
+             "-bs", str(self.config.beam_size), "-l", "auto",'--request-path',prefix]
+        if cpu_only:command.append('--no-gpu')
+        elif self.config.gpu_device:
+            device=self.config.gpu_device.removeprefix('Vulkan')
+            if not device.isdigit():raise ValueError('Invalid GPU device selection')
+            command.extend(['--device',device])
+        self.process = subprocess.Popen(command,
             cwd=str(exe.resolve().parent), stdout=self.log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -47,6 +52,7 @@ class VulkanWhisper:
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
+            if cancelled():self.close();raise InterruptedError('Speech loading cancelled')
             if self.process.poll() is not None:
                 break
             try:
@@ -55,7 +61,7 @@ class VulkanWhisper:
                         continue
                 self.log.seek(0)
                 log = self.log.read().decode("utf-8", errors="replace").lower()
-                if not self.gpu_allocated(log):
+                if not cpu_only and not self.gpu_allocated(log):
                     raise RuntimeError('Server did not confirm Vulkan GPU model allocation. '+log[-1600:])
                 return
             except (OSError, urllib.error.URLError):

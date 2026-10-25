@@ -28,7 +28,14 @@ class LocalAnalysisRuntime:
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
 
     def paths(self, config):
+        from core.components import resolve
+        mode=getattr(config,'processing_mode','legacy')
+        selected=(resolve('ai-cpu' if mode=='cpu' else 'ai-vulkan') or (resolve('ai-cpu') if mode=='auto' else None)) if getattr(config,'learning_model_id','external')=='qwen' else None
+        managed_model=resolve('qwen') if getattr(config,'learning_model_id','external')=='qwen' else None
         executable, model = managed_paths()
+        if selected and getattr(config,'learning_model_id','external')=='qwen':executable=selected
+        if managed_model:model=managed_model
+        if getattr(config,'learning_model_id','external')=='qwen':return Path(executable),Path(model)
         return Path(config.analysis_executable or executable), Path(config.analysis_gguf or model)
 
     @property
@@ -50,7 +57,7 @@ class LocalAnalysisRuntime:
 
     def ensure_loaded(self, config, progress=lambda message: None, cancelled=lambda: False):
         executable, model = self.paths(config)
-        signature = (str(executable.resolve()), str(model.resolve()), config.analysis_context_tokens)
+        signature = (str(executable.resolve()), str(model.resolve()), config.analysis_context_tokens,config.processing_mode,config.gpu_device,config.cpu_threads)
         if self.loaded and self.signature == signature:
             self.last_used = time.monotonic()
             return
@@ -60,16 +67,23 @@ class LocalAnalysisRuntime:
         if model.suffix.lower() != '.gguf':
             raise ValueError('Select a GGUF instruction model.')
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-        progress('Detecting Vulkan GPU...')
-        devices = subprocess.run([str(executable.resolve()), '--list-devices'], cwd=executable.resolve().parent,
-            capture_output=True, text=True, errors='replace', timeout=20, creationflags=flags)
-        output = devices.stdout + devices.stderr
-        candidates=list(re.finditer(r'(Vulkan\d+):[^\n]*(?:AMD|Radeon)[^\n]*', output, re.I))
-        found=next((item for item in candidates if 'RX 7700' in item[0]),None) or next((item for item in candidates if 'RX ' in item[0]),None) or next(iter(candidates),None)
-        if not found or devices.returncode:
-            raise RuntimeError('AMD Vulkan GPU was not detected. Check the Vulkan runtime and Radeon driver; CPU fallback is disabled.')
-        self.status = found[0].strip()
-        progress('Loading local model on ' + self.status)
+        from core.hardware import probe_devices,select_device,default_threads
+        mode=config.processing_mode
+        prefer_cpu=mode=='cpu'
+        device=None
+        if not prefer_cpu:
+            progress('Checking available GPU devices...')
+            try:device=select_device(probe_devices(executable),config.gpu_device)
+            except (OSError,subprocess.TimeoutExpired):device=None
+        if device is None and mode in ('legacy','gpu'):
+            raise RuntimeError('No compatible Vulkan GPU was detected. Choose CPU or Automatic in Models, or check the graphics driver.')
+        use_gpu=device is not None
+        if not use_gpu and mode=='auto':
+            from core.components import resolve
+            cpu_runtime=resolve('ai-cpu')
+            if cpu_runtime:executable=cpu_runtime
+        self.status=('GPU: '+device['name']) if use_gpu else 'CPU · local AI'
+        progress('Loading local model on '+self.status)
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
@@ -78,9 +92,10 @@ class LocalAnalysisRuntime:
         environment = {k:v for k,v in os.environ.items() if not k.startswith('LLAMA_ARG_')}
         environment['LLAMA_API_KEY'] = self.key
         command = [str(executable.resolve()), '--model', str(model.resolve()), '--host', '127.0.0.1',
-            '--port', str(port), '--device', found[1], '--n-gpu-layers', '99', '--ctx-size', str(config.analysis_context_tokens),
-            '--parallel', '1', '--threads', '4', '--threads-batch', '4', '--jinja', '--offline',
+            '--port', str(port), '--device', device['id'] if use_gpu else 'none', '--fit', 'on', '--ctx-size', str(config.analysis_context_tokens),
+            '--parallel', '1', '--threads', str(config.cpu_threads), '--threads-batch', str(config.cpu_threads), '--jinja', '--offline',
             '--cache-ram', '0', '--no-webui', '--alias', 'grammai-local', '--verbosity', '4', '--log-colors', 'off']
+        if not use_gpu:command.extend(['--n-gpu-layers','0'])
         try:
             self.process = subprocess.Popen(command, cwd=executable.resolve().parent, env=environment,
                 stdout=self.log, stderr=subprocess.STDOUT, creationflags=flags)
@@ -89,7 +104,7 @@ class LocalAnalysisRuntime:
             last_progress = started
             while time.monotonic() < deadline:
                 if time.monotonic()-last_progress >= 10:
-                    progress(f'Loading local GPU model ({time.monotonic()-started:.0f}s). First Vulkan startup can compile shaders.')
+                    progress(f'Loading local AI model ({time.monotonic()-started:.0f}s). First Vulkan startup can compile shaders.')
                     last_progress = time.monotonic()
                 if cancelled():
                     raise InterruptedError('Model loading cancelled')
@@ -99,13 +114,13 @@ class LocalAnalysisRuntime:
                     with self.http.open(self.request('/health'), timeout=.7) as response:
                         healthy = json.load(response).get('status') == 'ok'
                     if healthy:
-                        if not self.verified_offload(self.log_tail()):
+                        if use_gpu and not self.verified_offload(self.log_tail()):
                             diagnostics='\n'.join(line for line in self.log_tail().splitlines()
                                 if re.search(r'offload|vulkan.*buffer',line,re.I))[-2500:]
-                            raise RuntimeError('Runtime did not confirm Vulkan GPU model offloading. CPU fallback is disabled.\n'+(diagnostics or self.log_tail()[-2500:]))
+                            raise RuntimeError('Runtime did not confirm GPU model offloading. Retry or choose CPU in Models.\n'+(diagnostics or self.log_tail()[-2500:]))
                         self.signature = signature
                         self.last_used = time.monotonic()
-                        self.status = 'GPU verified: ' + found[0].strip()
+                        self.status = ('GPU verified: '+device['name']) if use_gpu else 'CPU verified · local AI'
                         progress(self.status)
                         return
                 except (OSError, urllib.error.URLError):
@@ -114,6 +129,13 @@ class LocalAnalysisRuntime:
             raise TimeoutError('Local model loading timed out. Try a smaller GGUF model or free GPU memory.')
         except Exception:
             self.close()
+            if mode=='auto' and use_gpu and not cancelled():
+                from core.components import resolve
+                from dataclasses import replace
+                if resolve('ai-cpu'):
+                    progress('GPU AI unavailable; using the installed CPU runtime.')
+                    self.ensure_loaded(replace(config,processing_mode='cpu'),progress,cancelled)
+                    self.signature=signature;self.status='CPU fallback · GPU unavailable';return
             raise
 
     def request(self, path, body=None):

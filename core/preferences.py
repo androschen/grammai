@@ -37,7 +37,7 @@ def load_config() -> AppConfig:
     if not isinstance(saved, dict):
         return config
     # Capture format is internal; only restore user-facing preferences.
-    names = {"saved_audio_limit_mb", "target_language", "source_language", "audio_device_id", "audio_device_name",
+    names = {"processing_mode","speech_model_id","learning_model_id","translation_model_id","gpu_device","setup_completed","saved_audio_limit_mb", "target_language", "source_language", "audio_device_id", "audio_device_name",
              "audio_device_kind", "noise_threshold", "quality_mode", "cpu_threads",
              "translation_mode", "translation_enabled", "translation_threads", "backend", "vulkan_executable", "vulkan_model",
              "theme", "show_overlay", "show_pronunciation", "subtitle_font_size", "overlay_opacity",
@@ -64,6 +64,8 @@ def load_config() -> AppConfig:
             setattr(config, name, value)
         except (TypeError, ValueError):
             continue
+    if config.processing_mode not in ('legacy','auto','cpu','gpu'):config.processing_mode='legacy'
+    if 'setup_completed' not in saved and saved:config.setup_completed=True
     if config.translation_mode not in ("fast", "context", "review"):
         config.translation_mode = "fast"
     if config.theme not in ("dark", "light"):
