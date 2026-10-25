@@ -39,6 +39,10 @@ def catalog():
         Component('qwen','Qwen3 4B','gguf',a.MODEL_REVISION,(Asset(a.MODEL_FILE,a.MODEL_URL,a.MODEL_BYTES,a.MODEL_SHA),),a.MODEL_FILE,('translation','learning'),'Qwen','Apache-2.0'),
         Component('ai-vulkan','AI Vulkan runtime','runtime',a.RUNTIME_VERSION,(Asset('runtime.zip',a.RUNTIME_URL,a.RUNTIME_BYTES,a.RUNTIME_SHA),),'llama-server.exe',('translation','learning'),'ggml-org/llama.cpp','MIT'),
         Component('ai-cpu','AI CPU runtime','runtime',a.RUNTIME_VERSION,(Asset('runtime.zip',f'https://github.com/ggml-org/llama.cpp/releases/download/{a.RUNTIME_VERSION}/llama-{a.RUNTIME_VERSION}-bin-win-cpu-x64.zip',19610948,'6b8d912796b6904771835d234f842e31e86d5e60da25555f9568d3bc88117bb9'),),'llama-server.exe',('translation','learning'),'ggml-org/llama.cpp','MIT')]
+    values.extend([
+        Component('speech-large','Whisper large-v3','ggml','5359861c739e955e79d9a303bcbc70fb988958b1',(Asset('ggml-large-v3-q5_0.bin','https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-q5_0.bin',1081140203,'d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1'),),'ggml-large-v3-q5_0.bin',('speech',),'ggerganov / OpenAI','MIT'),
+        Component('speech-qwen','Qwen3-ASR-1.7B · experimental','gguf','674df5d44b50a63e7102a18895ed20e3f91de301',(Asset('qwen3-asr-1.7b-q8_0.gguf','https://huggingface.co/cstr/qwen3-asr-1.7b-GGUF/resolve/674df5d44b50a63e7102a18895ed20e3f91de301/qwen3-asr-1.7b-q8_0.gguf',2506723200,'9851ab996591a2d0cb0efb216002764b509c86bd40c95e613d7b65b8e69c8a6e'),),'qwen3-asr-1.7b-q8_0.gguf',('speech',),'cstr conversion / Qwen','Apache-2.0'),
+        Component('qwen-asr-runtime','Qwen ASR CPU / Vulkan runtime','runtime','v0.8.44',(Asset('runtime.zip','https://github.com/CrispStrobe/CrispASR/releases/download/v0.8.44/crispasr-windows-x86_64-vulkan.zip',36195865,'e674dab8c67eb37ddc859ff5ef1a634af44d40ef33f12b97ab610686f1b0427b'),),'crispasr.exe',('speech',),'CrispStrobe/CrispASR · community build','MIT')])
     from core.translation_assets import NLLB
     values.append(Component('translation-fast','NLLB fast translation','ct2',NLLB['revision'],tuple(Asset(**item) for item in NLLB['assets']),'model.bin',('translation',),'JustFrederik / Meta','CC-BY-NC-4.0'))
     return {c.id:c for c in values}
@@ -99,7 +103,26 @@ class ComponentManager:
     def path(self,identifier):
         record=self.records().get(identifier,{})
         path=Path(record['path']) if record.get('path') else None
-        return path if path and path.is_file() else None
+        if path and path.is_file():return path
+        spec=catalog().get(identifier)
+        if spec is None:return None
+        candidates=[self.root/'managed'/identifier/spec.version/spec.entry]
+        if identifier=='speech-cpu':
+            caches=[Path.home()/'.cache/huggingface/hub']
+            for name in ('HF_HUB_CACHE','HUGGINGFACE_HUB_CACHE'):
+                if os.environ.get(name):caches.insert(0,Path(os.environ[name]))
+            if os.environ.get('HF_HOME'):caches.insert(0,Path(os.environ['HF_HOME'])/'hub')
+            candidates.extend(cache/'models--Systran--faster-whisper-base/snapshots'/spec.version/spec.entry for cache in caches)
+        elif identifier=='translation-fast':
+            candidates.append(Path.home()/'.grammai/models/nllb-200-distilled-600M-int8'/spec.entry)
+        return next((p for p in candidates if p.is_file()),None)
+    def availability(self,identifier):
+        path=self.path(identifier)
+        if path is None:return 'missing'
+        spec=catalog()[identifier]
+        if spec.kind=='ct2' and any(not (path.parent/asset.name).is_file() for asset in spec.assets):return 'incomplete'
+        return 'installed'
+
     def register(self,identifier,path,managed=False,hashes=None):
         path=Path(path).absolute()
         if not path.is_file():raise ValueError('Component file does not exist.')
@@ -127,6 +150,13 @@ class ComponentManager:
         existing=self.path(identifier)
         if existing and spec.kind=='runtime' and not self.records()[identifier].get('managed'):return existing
         if existing:
+            if spec.kind=='ct2':
+                for asset in spec.assets:
+                    file=existing.parent/asset.name
+                    if file.is_file():
+                        if file.stat().st_size!=asset.size or digest(file,cancelled)!=asset.sha:raise ValueError('Existing model files differ from the curated version; keep the custom model or import matching files.')
+                    else:fetch(asset,file,progress,cancelled)
+            if not self.records().get(identifier):self.register(identifier,existing)
             self.verify(identifier,progress,cancelled);return existing
         self.root.mkdir(parents=True,exist_ok=True)
         if shutil.disk_usage(self.root).free<spec.size*2+100*1024**2:raise ValueError('Not enough free space for download and staging.')

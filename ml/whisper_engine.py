@@ -25,6 +25,7 @@ class WhisperEngine:
         self._loaded_size = None
         self._vulkan = None
         self.last_timings = {}
+        self.last_translation_model="";self.last_translation_backend="";self.last_translation_fallback=""
         self.active_backend = "Not loaded"
         self.activity_callback = None
         self._overlap_seconds=0.
@@ -55,8 +56,20 @@ class WhisperEngine:
         used_backup=False
         managed_cpu=resolve('speech-cpu') if config.speech_model_id!='external' or config.processing_mode=='auto' else None
         gpu_requested=config.processing_mode=='gpu' or (config.processing_mode in ('auto','legacy') and config.backend=='vulkan')
-        if config.speech_model_id=='speech-turbo':
-            runtime,model=resolve('speech-runtime'),resolve('speech-turbo')
+        if config.speech_model_id=='speech-qwen':
+            from ml.qwen_asr import QwenASR
+            self._vulkan=QwenASR(config)
+            try:self._vulkan.start(cancelled=cancelled)
+            except Exception:
+                self.close()
+                if cancelled() or config.processing_mode!='auto':raise
+                self._vulkan=QwenASR(config)
+                try:self._vulkan.start(cpu_only=True,cancelled=cancelled)
+                except Exception:self.close();raise
+            self.active_backend=self._vulkan.active_backend;self._loaded_size=key;return
+        if config.speech_model_id in ('speech-turbo','speech-large'):
+            from core.speech_models import paths
+            found=paths(config.speech_model_id,config);runtime,model=found['speech-runtime'],found[config.speech_model_id]
             if not runtime or not model:raise ValueError('Install the selected speech model and runtime in Models.')
             config=replace(config,vulkan_executable=str(runtime),vulkan_model=str(model))
             gpu_requested=config.processing_mode!='cpu'
@@ -76,7 +89,7 @@ class WhisperEngine:
                 self.active_backend = "GPU / Vulkan"
                 self._loaded_size = key
                 return
-        if config.processing_mode=='cpu' and (config.speech_model_id=='speech-turbo' or (config.speech_model_id=='external' and config.backend=='vulkan')):
+        if config.processing_mode=='cpu' and (config.speech_model_id in ('speech-turbo','speech-large') or (config.speech_model_id=='external' and config.backend=='vulkan')):
             from ml.vulkan_engine import VulkanWhisper
             self._vulkan=VulkanWhisper(config);self._vulkan.start(cpu_only=True,cancelled=cancelled)
             self.active_backend='CPU / whisper.cpp';self._loaded_size=key;return
@@ -127,6 +140,16 @@ class WhisperEngine:
             self.activity_callback('Translation model loading')
         self._translator.ensure_loaded()
 
+    def speech_identity(self):
+        from pathlib import Path
+        from core.speech_models import TITLES
+        c=self._config
+        if self._vulkan is not None:
+            name=TITLES.get(c.speech_model_id,Path(c.vulkan_model).stem or 'Whisper')
+        else:
+            name='Whisper base' if 'backup' in self.active_backend or c.speech_model_id=='speech-cpu' else 'Whisper '+c.model_size
+        return dict(speech_model=name,speech_backend=self.active_backend)
+
     def process(self, audio: np.ndarray, target: TargetLanguage) -> SubtitleUpdate | None:
         started = perf_counter()
         if self.activity_callback:
@@ -152,9 +175,10 @@ class WhisperEngine:
             return SubtitleUpdate(phonetics=phonetics_auto(native),target_text=native,
                 native_text=native,translation_status='transcribed',
                 audio_overlap_seconds=overlap_seconds,overlap_previous_text=previous_native,
-                source_language=source,target_language=source)
+                source_language=source,target_language=source,**self.speech_identity())
         target_code = target.value
         target_text = native
+        self.last_translation_model="";self.last_translation_backend="";self.last_translation_fallback=""
         if source != target_code:
             if self.activity_callback:
                 self.activity_callback('Translation')
@@ -173,6 +197,8 @@ class WhisperEngine:
             native_text=native,
             native_phonetics=phonetics_auto(native),
             translation_status=status,
+            translation_model=self.last_translation_model,translation_backend=self.last_translation_backend,
+            translation_fallback=self.last_translation_fallback,**self.speech_identity(),
             source_language=source,
             target_language=target_code,
             audio_overlap_seconds=overlap_seconds,overlap_previous_text=previous_native,
@@ -189,13 +215,19 @@ class WhisperEngine:
             try:
                 translated = self._translator.translate(native, source, target.value)
                 if translated:
+                    self.last_translation_model=getattr(self._translator,"last_model","")
+                    self.last_translation_backend=getattr(self._translator,"last_backend","")
+                    self.last_translation_fallback=getattr(self._translator,"last_fallback","")
                     return translated
             except InterruptedError:
                 raise
             except Exception:
                 pass
-        if target is TargetLanguage.ENGLISH:
+        if target is TargetLanguage.ENGLISH and self._config.speech_model_id!='speech-qwen':
             fallback, _ = self._transcribe(audio, task="translate")
+            self.last_translation_model=self.speech_identity()["speech_model"]+" (audio translation)"
+            self.last_translation_backend=self.active_backend
+            self.last_translation_fallback="Text translation unavailable; Whisper translated audio to English."
             return fallback
         return ""
 

@@ -83,6 +83,8 @@ class AppConfig:
     rms_full_scale: float = 0.12
     quality_mode: QualityMode = QualityMode.BALANCED
     translation_mode: str = "fast"
+    refinement_enabled: bool = False
+    refinement_destination: str = "history"
     translation_enabled: bool = True
     translation_threads: int = 2
     translation_beam_size: int = 2
@@ -160,7 +162,7 @@ class AppConfig:
                            self.cpu_threads, self.translation_threads, self.translation_beam_size,
                            self.vulkan_executable, self.vulkan_model, self.translation_enabled,
                            self.speech_detection,self.speech_max_seconds,self.speech_silence_seconds,
-                           self.speech_overlap_seconds,self.speech_prompt,self.translation_mode,
+                           self.speech_overlap_seconds,self.speech_prompt,self.translation_mode,self.refinement_enabled,self.refinement_destination,
                            self.analysis_executable,self.analysis_gguf,self.analysis_context_tokens,
                            self.analysis_context_sentences,self.processing_mode,self.speech_model_id,self.learning_model_id,self.translation_model_id,self.gpu_device),
         )

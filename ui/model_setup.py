@@ -41,6 +41,12 @@ class TaskWidget(QWidget):
         self.progress=QProgressBar();self.progress.setRange(0,100);self.progress.hide()
         self.cancel=icon_button('stop','Cancel component task',self);self.cancel.hide();self.cancel.clicked.connect(self.cancel_job)
     def task_footer(self,layout):
+        # A standalone task owns its footer and participates in the caller's
+        # layout. Leaving an empty helper at the parent's origin intercepts
+        # clicks on unrelated controls, including the Settings tab bar.
+        if self.layout() is None:
+            footer=QVBoxLayout(self);footer.setContentsMargins(0,0,0,0);footer.setSpacing(6)
+            layout.addWidget(self);layout=footer
         layout.addWidget(self.status);row=QHBoxLayout();row.addWidget(self.progress,1);row.addWidget(self.cancel);layout.addLayout(row)
     def cancel_job(self):
         if self.job:self.job.requestInterruption();self.status.setText('Cancelling safely…')
@@ -52,8 +58,10 @@ class TaskWidget(QWidget):
             if self.events.property('translation_running') or not idle() or (service and (service.busy or service.runtime.loaded)):
                 self.status.setText('Pause translation, then use Manage components → Unload local AI before testing or changing files.');return False
         return True
-    def start_job(self,work,callback=None):
-        if not self.can_modify():return False
+    def start_job(self,work,callback=None,requires_idle=True):
+        if requires_idle and not self.can_modify():return False
+        if not requires_idle and (active_jobs() or (self.events and self.events.property('speech_switch_busy'))):
+            self.status.setText('Finish or cancel the active model task first.');return False
         self._callback=callback;self.progress.setValue(0);self.progress.show();self.cancel.show()
         self.job=ModelJob(work);self.job.progress.connect(self._progress);self.job.completed.connect(self._done);self.job.start();return True
     def _progress(self,message,value):self.status.setText(message);self.progress.setValue(value)
@@ -107,7 +115,8 @@ class ComponentsWidget(TaskWidget):
             self.choice.addItem(spec.title+(' · installed' if path else ' · not installed'),identifier)
             card,button,state,verify=self.cards[identifier]
             button.setText(spec.title+'\n'+', '.join(spec.roles)+f' · {spec.size/1e6:.0f} MB')
-            state.setText('Installed' if path else 'Available');verify.setEnabled(bool(path))
+            availability=self.manager.availability(identifier)
+            state.setText({'installed':'Installed','incomplete':'Missing files','missing':'Available'}[availability]);verify.setEnabled(availability=='installed')
 
         self.choice.setCurrentIndex(max(0,self.choice.findData(selected)));self.choice.blockSignals(False);self.describe()
     def select_component(self,identifier):
@@ -154,7 +163,7 @@ class ComponentsWidget(TaskWidget):
         identifier=self.choice.currentData()
         from core.components import resolve
         referenced=any(Path(value).resolve()==self.manager.path(identifier) for value in (self.config.vulkan_model,self.config.vulkan_executable,self.config.analysis_gguf,self.config.analysis_executable) if value)
-        used=referenced or (identifier==self.config.speech_model_id or (identifier=='qwen' and self.config.learning_model_id=='qwen') or (identifier=='translation-fast' and self.config.translation_enabled and self.config.translation_mode=='fast') or (identifier=='speech-runtime' and self.config.speech_model_id=='speech-turbo') or (identifier in ('ai-cpu','ai-vulkan') and self.config.learning_model_id=='qwen'))
+        used=referenced or (identifier==self.config.speech_model_id or (identifier=='qwen-asr-runtime' and self.config.speech_model_id=='speech-qwen') or (identifier=='qwen' and self.config.learning_model_id=='qwen') or (identifier=='translation-fast' and self.config.translation_enabled and self.config.translation_mode=='fast') or (identifier=='speech-runtime' and self.config.speech_model_id in ('speech-turbo','speech-large')) or (identifier in ('ai-cpu','ai-vulkan') and self.config.learning_model_id=='qwen'))
         if used:self.status.setText('Choose and save another model before removing a selected component.');return
         if QMessageBox.question(self,'Remove component?','Remove only this managed component? Cards, recordings and external files stay.')!=QMessageBox.StandardButton.Yes:return
         self.start_job(lambda p,c:self.manager.remove(identifier),lambda result:self.refresh())

@@ -32,8 +32,8 @@ class ModelSettingsTests(unittest.TestCase):
         self.assertIn('GPU preferred',d._selected_models.text());self.assertNotIn('Radeon GPU',d._selected_models.text())
     def test_draft_and_live_status_never_apply_pending_selection(self):
         d=self.dialog
-        d._translation_mode.setCurrentIndex(d._translation_mode.findData('review'))
-        self.assertEqual(d._draft().translation_mode,'review')
+        d._refinement.setChecked(True)
+        self.assertEqual(d._draft().translation_mode,'fast');self.assertTrue(d._draft().refinement_enabled)
         self.assertEqual(self.config.translation_mode,'fast')
         self.assertNotIn('compare and apply',d._mode_hint.text())
         d._model_metrics({'kind':'live','backend':'Stopped','analysis_status':'Unloaded'})

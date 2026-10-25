@@ -94,3 +94,15 @@ Speech recognition, fast CPU translation and shared learning AI are separate com
 Automatic mode may use an already installed CPU backup when GPU speech fails; smaller-model fallback can change accuracy. GPU preferred requires verified GPU allocation. Test setup reports speed on a bundled synthetic English sample, not a multilingual accuracy score. Pause translation and unload AI before component tests or file changes.
 
 Component downloads can resume and require pinned checksums before activation. Repair restores the previous managed version on failure. Change location copies and verifies managed files before committing the new location; cards, recordings and external model files stay where they were. Review each model license before use; NLLB weights use CC-BY-NC-4.0.
+
+## Speech model selection (local builds from 0.15.0)
+
+Open **Settings → Models → Speech recognition**. A download icon marks missing components; a check marks installed files. The running label reflects live telemetry. Select a model, download if needed, then **Save changes**. Downloading does not switch models. Save pauses recognition while loading and testing the candidate; a failed test keeps the previous selection.
+
+Turbo Q5 is about 574 MB, full large-v3 Q5 about 1.08 GB, and Qwen3-ASR-1.7B Q8 about 2.51 GB. Missing speech runtimes are additional downloads. These file sizes are not RAM/VRAM requirements. Qwen speech uses the separately pinned CrispASR community runtime and is experimental; the first Vulkan inference may spend extra time compiling shaders. CPU mode uses the same selected Qwen weights and can be substantially slower. The text Qwen3-4B model is separate.
+
+### Clear model roles (0.15.1)
+
+Settings > Models separates Live translation from AI refinement. Live translation chooses NLLB on CPU or the shared local Qwen model. Optional refinement reviews original speech and nearby dialogue; choose history only or history plus the currently displayed subtitle. When Qwen already translates live with context, an additional review pass is disabled to avoid competing for the same runtime.
+
+Hover, focus, or click the info icon beside Sentence to see the models actually used, CPU/GPU backend, refinement result, and any fallback. Existing sentences retain their own metadata when settings change. Missing legacy metadata is reported as not recorded rather than inferred from current settings. Installed Whisper base cache files are reused in place; no duplicate download is required.

@@ -30,6 +30,13 @@ class SubtitleUpdate:
     review_reason: str = "Automatic review has not run."
     audio_overlap_seconds: float = 0.
     overlap_previous_text: str = ""
+    speech_model: str = ""
+    speech_backend: str = ""
+    translation_model: str = ""
+    translation_backend: str = ""
+    translation_fallback: str = ""
+    refinement_model: str = ""
+    refinement_backend: str = ""
 
 
 @dataclass(frozen=True)
@@ -84,4 +91,6 @@ class EventBus(QObject):
     # Fast path: RMS/peak level 0.0â€“1.0, ~20â€“30 Hz from the capture thread.
     audio_level_changed = Signal(float)
     # Device, language routing, and noise threshold for HUD + backend.
+    speech_switch_requested = Signal(object)
+    speech_switch_finished = Signal(object)
     state_changed = Signal(object)  # AppState

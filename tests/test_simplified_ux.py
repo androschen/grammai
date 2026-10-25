@@ -51,9 +51,9 @@ class SimplifiedUXTests(unittest.TestCase):
         self.assertTrue(w.cancel.isHidden());self.assertTrue(w.apply.isHidden());self.assertEqual(w.result_layout.count(),4)
         w._run();self.assertFalse(w.cancel.isHidden());w.cancel_request();self.assertTrue(w.cancel.isHidden())
     def test_same_language_has_status_tooltip_without_empty_translation_section(self):
-        d=self.make(source='en',target='en');self.assertTrue(d.translation_section.isHidden());self.assertFalse(d.route_review_icon.isHidden())
+        d=self.make(source='en',target='en');self.assertTrue(d.translation_section.isHidden());self.assertTrue(d.route_review_icon.isHidden());self.assertFalse(d.model_info.isHidden())
         self.events.review_state_changed.emit(replace(self.value,review_status='skipped',review_reason='Already English.'))
-        self.assertIn('Already English',d.route_review_icon.toolTip())
+        self.assertIn('Already English',d.model_info.toolTip())
     def test_one_follow_control_and_save_confirmation_only_invalidates_meaning_edits(self):
         p=HistoryPanel();self.assertFalse(any(b.text()=='Resume live' for b in p.findChildren(QPushButton)));p.close()
         d=self.make();d.bookmark.click();d.reviewed.setChecked(True);d.notes.setPlainText('Reminder');self.assertTrue(d.reviewed.isChecked())

@@ -39,6 +39,9 @@ class NllbTranslator:
         self._translator = None
         self._tokenizer = None
         self._failure: str | None = None
+        self.last_model = "NLLB-200 600M"
+        self.last_backend = "CPU / int8"
+        self.last_fallback = ""
 
     def configure(self, config: AppConfig) -> None:
         if self._config.translation_threads != config.translation_threads:
@@ -97,7 +100,7 @@ class NllbTranslator:
         from transformers import AutoTokenizer
 
         model_dir = self._resolve_model_dir()
-        self._notify("Loading NLLB translator (first run may download)…")
+        self._notify("Loading installed NLLB translator…")
         self._tokenizer = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True, use_fast=False)
         self._translator = ctranslate2.Translator(
             str(model_dir),

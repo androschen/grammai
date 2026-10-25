@@ -39,7 +39,7 @@ def load_config() -> AppConfig:
     # Capture format is internal; only restore user-facing preferences.
     names = {"processing_mode","speech_model_id","learning_model_id","translation_model_id","gpu_device","setup_completed","saved_audio_limit_mb", "target_language", "source_language", "audio_device_id", "audio_device_name",
              "audio_device_kind", "noise_threshold", "quality_mode", "cpu_threads",
-             "translation_mode", "translation_enabled", "translation_threads", "backend", "vulkan_executable", "vulkan_model",
+             "translation_mode", "refinement_enabled", "refinement_destination", "translation_enabled", "translation_threads", "backend", "vulkan_executable", "vulkan_model",
              "theme", "show_overlay", "show_pronunciation", "subtitle_font_size", "overlay_opacity",
              "overlay_position", "analysis_enabled", "analysis_endpoint", "analysis_model", "analysis_key_env",
              "analysis_provider", "analysis_executable", "analysis_gguf", "analysis_context_tokens",
@@ -68,6 +68,11 @@ def load_config() -> AppConfig:
     if 'setup_completed' not in saved and saved:config.setup_completed=True
     if config.translation_mode not in ("fast", "context", "review"):
         config.translation_mode = "fast"
+    if config.translation_mode == "review":
+        config.translation_mode = "fast"
+        config.refinement_enabled = True
+    if config.refinement_destination not in ("history", "history_subtitles"):
+        config.refinement_destination = "history"
     if config.theme not in ("dark", "light"):
         config.theme = "dark"
     if config.saved_audio_limit_mb not in (100,250,500):config.saved_audio_limit_mb=250
@@ -80,7 +85,7 @@ def load_config() -> AppConfig:
     config.overlay_padding = max(8,min(36,config.overlay_padding))
     config.overlay_corner_radius = max(0,min(32,config.overlay_corner_radius))
     config.overlay_max_width = max(35,min(95,config.overlay_max_width))
-    if config.backend not in ("cpu", "vulkan"):
+    if config.backend not in ("cpu", "vulkan", "qwen-asr"):
         config.backend = "cpu"
     if config.source_language not in ("auto", "auto_trio", "auto_four", "en", "zh", "th", "id"):
         config.source_language = "auto"

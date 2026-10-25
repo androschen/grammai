@@ -119,7 +119,8 @@ class GrammAIApp:
     def _corrected_subtitle(self,update):
         if self._last_update and self._last_update.uid==update.uid:
             self._last_update=update
-            # History revisions should not rewrite a subtitle already being read.
+            if update.ai_refined and self._config.refinement_destination == "history_subtitles":
+                self._overlay.apply_subtitle(update)
 
     def _open_phrase(self,payload):
         from ui.phrase_explain import PhraseExplanationDialog

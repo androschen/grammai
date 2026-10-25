@@ -39,6 +39,17 @@ def build_details(study,update,store,analysis,history):
     study.setObjectName('sentenceStudy');study.setWindowTitle('Sentence details');study.setStyleSheet(style_for(study.config.theme));study.resize(480,700)
     outer=QVBoxLayout(study);outer.setContentsMargins(14,12,14,12);outer.setSpacing(8)
     header=QHBoxLayout();title=QLabel('Sentence');title.setObjectName('field');header.addWidget(title);header.addStretch()
+    study.model_info=icon_button('info','Sentence model information',study);study.model_info.setFixedSize(28,28);header.insertWidget(1,study.model_info)
+    def show_model_info():
+        from PySide6.QtWidgets import QToolTip
+        QToolTip.showText(study.model_info.mapToGlobal(study.model_info.rect().bottomLeft()),study.model_info.toolTip(),study.model_info)
+    study.model_info.clicked.connect(show_model_info)
+    from PySide6.QtCore import QObject,QEvent
+    class InfoFocus(QObject):
+        def eventFilter(self,obj,event):
+            if event.type()==QEvent.Type.FocusIn:show_model_info()
+            return False
+    study._info_focus=InfoFocus(study.model_info);study.model_info.installEventFilter(study._info_focus)
     study.replay=icon_button('play','Replay retained audio',study)
     study.speed=QComboBox();study.speed.addItem('1×',1.);study.speed.addItem('0.8×',.8);study.speed.setFixedWidth(78);study.speed.setAccessibleName('Replay speed')
     study._replay_active=False;study._replay_requested_here=False
@@ -82,7 +93,8 @@ def build_details(study,update,store,analysis,history):
     study.source_display=CopyableLabel();study.source_display.setWordWrap(True);study.source_display.setObjectName('sentenceOriginal');source_box.addWidget(study.source_display)
     study.pronunciation=CopyableLabel();study.pronunciation.setWordWrap(True);study.pronunciation.setObjectName('phonetic');source_box.addWidget(study.pronunciation)
     study.translation_section,translation_box=section('sentenceTranslationSection','Translation')
-    study.review_status_label=QLabel();study.review_status_label.setObjectName('reviewStatus');study.review_status_label.setWordWrap(True);study.translation_heading_row.addWidget(study.review_status_label)
+    study.review_status_label=QLabel();study.review_status_label.setObjectName('reviewStatus');study.review_status_label.setWordWrap(True);study.review_status_label.hide()
+    study.refined_icon=QLabel();study.refined_icon.setAccessibleName('AI refined');study.translation_heading_row.addWidget(study.refined_icon)
     study.translation_display=CopyableLabel();study.translation_display.setWordWrap(True);study.translation_display.setObjectName('sentenceTranslation');translation_box.addWidget(study.translation_display)
     study.target_pronunciation=CopyableLabel();study.target_pronunciation.setWordWrap(True);study.target_pronunciation.setObjectName('phonetic');translation_box.addWidget(study.target_pronunciation)
     for label in (study.route_label,study.source_display,study.pronunciation,study.translation_display,study.target_pronunciation):
@@ -164,9 +176,14 @@ def build_details(study,update,store,analysis,history):
         from PySide6.QtGui import QIcon
         from ui.icons import LineIcon
         same=study.source_display.text()==study.subtitle.target_text
-        study.route_review_icon.setVisible(same)
+        study.route_review_icon.hide()
         study.route_review_icon.setPixmap(QIcon(LineIcon('info')).pixmap(14,14))
         study.route_review_icon.setToolTip(study.review_status_label.accessibleName());study.route_review_icon.setAccessibleName(study.review_status_label.accessibleName())
+        from core.model_info import sentence_info
+        info=sentence_info(study._proposal or study.subtitle)
+        study.model_info.setToolTip(info);study.model_info.setAccessibleDescription(info)
+        study.refined_icon.setPixmap(QIcon(LineIcon('sparkles')).pixmap(14,14));study.refined_icon.setVisible(study.subtitle.ai_refined)
+        study.refined_icon.setToolTip('AI changed this translation')
         study.translation_section.setVisible(not same or study._proposal is not None)
         study.review_status_label.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Maximum)
     study._refresh_review_status=refresh_review_status

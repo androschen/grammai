@@ -16,7 +16,7 @@ class SlowEngine:
     maximum=0
     def configure(self,config):
         self.config=config
-    def ensure_loaded(self):
+    def ensure_loaded(self,**kwargs):
         type(self).active+=1
         type(self).maximum=max(type(self).maximum,type(self).active)
         QThread.msleep(150)

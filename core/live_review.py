@@ -1,6 +1,7 @@
 """One active and one pending local review; suggestions stay session-only."""
 from dataclasses import replace
 from core.revisions import revised_update
+from core.model_info import refinement_enabled
 from ml.phonetics import phonetics_auto
 from time import monotonic
 from uuid import uuid4
@@ -24,7 +25,7 @@ class LiveReview(QObject):
 
     def current_signature(self):
         c=self.config
-        return (c.translation_mode,c.translation_enabled,c.source_language,c.target_language,c.audio_device_id,
+        return (c.translation_mode,c.refinement_enabled,c.refinement_destination,c.translation_enabled,c.source_language,c.target_language,c.audio_device_id,
                 c.analysis_executable,c.analysis_gguf,c.analysis_context_sentences,c.analysis_context_tokens)
 
     def reset_if_changed(self,state):
@@ -35,7 +36,10 @@ class LiveReview(QObject):
     def _state(self,update,status,reason):
         current=next((item for item in self.history.items() if item.uid==update.uid),None)
         if not current or (current.native_text,current.target_text,current.revision_count)!=(update.native_text,update.target_text,update.revision_count):return
-        value=replace(current,review_status=status,review_reason=reason)
+        from core.model_info import local_ai_name
+        value=replace(current,review_status=status,review_reason=reason,
+            refinement_model=local_ai_name(self.config,getattr(self.service,'runtime',None)) if status not in ('not_requested','skipped') else current.refinement_model,
+            refinement_backend=str(getattr(getattr(self.service,'runtime',None),'status','')) if status=='reviewing' else current.refinement_backend)
         self.history.replace(value);self.events.review_state_changed.emit(value)
 
     def reset(self):
@@ -55,8 +59,8 @@ class LiveReview(QObject):
 
     def enqueue(self,update):
         if self.closed:return
-        if self.config.translation_mode!='review' or not self.config.translation_enabled or not self.is_live():
-            self._state(update,'not_requested','Automatic review requires Fast + review mode and an active translation session.');return
+        if not refinement_enabled(self.config) or not self.config.translation_enabled or not self.is_live():
+            self._state(update,'not_requested','AI refinement is off or the translation session is inactive.');return
         if update.source_language not in ('zh','en','th','id') or update.source_language==update.target_language or len(update.native_text)>1000:
             reason='Original speech already matches the target language.' if update.source_language==update.target_language else 'The transcript language or length is outside automatic review limits.'
             self._state(update,'skipped',reason);return
@@ -68,7 +72,7 @@ class LiveReview(QObject):
             return
         if self.closed or self.active or not self.pending or self.service.busy or monotonic()<self.retry_after:
             return
-        if self.config.translation_mode!='review' or not self.is_live():
+        if not refinement_enabled(self.config) or not self.is_live():
             self._state(self.pending,'skipped','Automatic review is no longer active.');self.pending=None;return
         update=self.pending
         items=self.history.items()
@@ -109,6 +113,9 @@ class LiveReview(QObject):
         if not suggestion:
             self._state(current,'failed','Local AI returned no usable translation. Fast translation is retained.');return
         if suggestion==current.target_text:
+            current=replace(current,refinement_model=value.get('model',current.refinement_model),refinement_backend=value.get('backend',current.refinement_backend))
+            self.history.replace(current)
             self._state(current,'unchanged','Local AI reviewed this sentence and kept the wording.');return
-        refined=revised_update(current,target_text=suggestion,phonetics=phonetics_auto(suggestion),ai_refined=True,review_status='refined',review_reason='Local AI changed the translation. Reviewed does not mean verified correct.')
+        from core.model_info import local_ai_name
+        refined=revised_update(current,refinement_model=value.get('model') or local_ai_name(self.config,getattr(self.service,'runtime',None)),refinement_backend=value.get('backend',''),target_text=suggestion,phonetics=phonetics_auto(suggestion),ai_refined=True,review_status='refined',review_reason='Local AI changed the translation. Reviewed does not mean verified correct.')
         self.history.replace(refined);self.events.subtitle_corrected.emit(refined)

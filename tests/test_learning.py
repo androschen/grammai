@@ -172,7 +172,7 @@ class CaptureToReplayTests(unittest.TestCase):
         class Engine(SlowEngine):
             active_backend='CPU / int8'
             last_timings={'stt_ms':1.,'mt_ms':1.,'total_ms':2.}
-            def ensure_loaded(self):
+            def ensure_loaded(self,**kwargs):
                 pass
             def process(self,audio,target):
                 return SubtitleUpdate('','target','original',source_language='en',target_language='zh')

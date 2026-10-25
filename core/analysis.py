@@ -42,6 +42,8 @@ class AnalysisWorker(QThread):
                 translator.ensure_loaded(self.progress.emit,self.isInterruptionRequested)
                 value={'translation':translator.translate(self.payload['text'],self.payload['source'],
                     self.payload['target'],cancelled=self.isInterruptionRequested,context=self.payload.get('context'))}
+                from core.model_info import local_ai_name
+                value.update(model=local_ai_name(self.config,self.runtime),backend=self.runtime.status)
             elif self.operation=='compare':
                 from core.translation_compare import compare_translations
                 value=compare_translations(self.config,self.payload,self.runtime,
@@ -87,10 +89,9 @@ class AnalysisService(QObject):
     def busy(self):
         return self.worker is not None
 
-    @staticmethod
-    def _components_busy():
+    def _components_busy(self):
         from ui.model_setup import active_jobs
-        return bool(active_jobs())
+        return bool(active_jobs()) or bool(self.events and self.events.property('speech_switch_busy'))
 
     def _status(self,message):
         self.status_changed.emit(message)

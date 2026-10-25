@@ -41,30 +41,60 @@ def smoke_check(report,verify_models=False):
 
         dialog=StudyDialog(SubtitleUpdate('','Hello','Hello',source_language='en'),AppConfig(),events,ReplayStore(),None)
         dialog.show();QApplication.processEvents()
+        assert dialog.model_info.toolTip() and dialog.review_status_label.isHidden()
+        results['sentence_model_info']='ok'
         results['details']='ok';dialog.reject();dialog.deleteLater()
         overlay=SubtitleOverlay(events,AppConfig());overlay.close();results['overlay']='ok'
         from ui.translation_compare import TranslationComparisonDialog
         comparison=TranslationComparisonDialog(AppConfig(),events)
         comparison.reject();comparison.deleteLater();results['comparison_ui']='ok'
+        from core.components import catalog
         from ui.settings import SettingsDialog
         settings=SettingsDialog(AppConfig(),events)
-        assert settings._translation_mode.count()==3
+        assert settings._translation_mode.count()==2
+        assert settings._refinement_destination.count()==2
+        results['separate_refinement_settings']='ok'
         settings.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
         settings.tabs.setCurrentIndex(3);settings.resize(1000,850);settings.show();QApplication.processEvents()
-        for control in (settings._processing,settings._speech_choice,settings._translation_mode,settings._learning_choice,settings.manage_components,settings.test_setup,settings.setup_assistant):
+        for control in (settings._processing,settings._speech_choice,settings._translation_mode,settings._refinement,settings._refinement_destination,settings._learning_choice,settings.manage_components,settings.test_setup,settings.setup_assistant):
             assert settings._models_normal.isAncestorOf(control), 'Models control has the wrong parent'
             assert control.isVisible(), 'Models control is hidden'
+            settings.tabs.widget(3).ensureWidgetVisible(control);QApplication.processEvents()
             point=control.mapTo(settings,control.rect().center())
             assert settings.childAt(point) is control, 'Another widget blocks Models input'
+        assert settings._speech_choice.findData('speech-qwen')>=0 and settings._speech_choice.findData('speech-large')>=0
+        assert not settings._speech_choice.itemIcon(settings._speech_choice.findData('speech-qwen')).isNull()
+        results['speech_model_switcher']='ok'
         settings._show_components(True);QApplication.processEvents()
         assert not settings._processing.isVisible() and settings.component_manager.isVisible()
-        assert len(settings.component_manager.cards)==7
+        assert len(settings.component_manager.cards)==len(catalog())
         settings._show_components(False);QApplication.processEvents()
         assert settings._processing.isVisible()
         results['models_input_routing']='ok'
         settings.reject();settings.deleteLater();results['translation_settings']='ok'
+        from ui.settings import SettingsPage
+        from PySide6.QtWidgets import QWidget,QVBoxLayout
+        from PySide6.QtTest import QTest
+        host=QWidget();host.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
+        settings_page=SettingsPage(AppConfig(),events,host,page=2)
+        QVBoxLayout(host).addWidget(settings_page);host.resize(1100,850);host.show();QApplication.processEvents()
+        assert not settings_page.save_changes.isEnabled(), 'Save starts enabled without edits'
+        original=settings_page._source.currentIndex()
+        settings_page._source.setCurrentIndex((original+1)%settings_page._source.count())
+        assert settings_page.save_changes.isEnabled(), 'Save did not enable after a setting changed'
+        settings_page._source.setCurrentIndex(original)
+        assert not settings_page.save_changes.isEnabled(), 'Reverted settings still enable Save'
+        results['settings_dirty_state']='ok'
+        bar=settings_page.tabs.tabBar()
+        for index in (0,1,2,3,4,5,2):
+            point=bar.mapTo(host,bar.tabRect(index).center())
+            assert host.childAt(point) is bar, 'A widget covers Settings navigation'
+            QTest.mouseClick(host.windowHandle(),Qt.MouseButton.LeftButton,pos=point);QApplication.processEvents()
+            assert settings_page.tabs.currentIndex()==index, 'Settings navigation ignored pointer input'
+        settings_page.dispose();host.close();host.deleteLater();results['settings_navigation']='ok'
+
         from core.components import catalog
-        assert {'speech-cpu','speech-turbo','qwen','ai-cpu','ai-vulkan','translation-fast'}<=set(catalog())
+        assert {'speech-cpu','speech-turbo','speech-large','speech-qwen','qwen-asr-runtime','qwen','ai-cpu','ai-vulkan','translation-fast'}<=set(catalog())
         results['component_catalog']='ok'
         from ui.model_setup import SetupDialog,active_jobs
         from PySide6.QtTest import QTest

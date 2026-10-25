@@ -5,6 +5,10 @@ from dataclasses import replace
 def revised_update(original, **changes):
     if any(key in changes for key in ('native_text','target_text')):
         changes.setdefault('suggested_translation','')
+        if not changes.get('ai_refined',False):
+            changes.setdefault('refinement_model','');changes.setdefault('refinement_backend','')
+            if changes.get('target_text',original.target_text)!=original.target_text:
+                changes.setdefault('translation_model','');changes.setdefault('translation_backend','');changes.setdefault('translation_fallback','')
     candidate = replace(original, **changes)
     changed = (candidate.native_text, candidate.target_text) != (original.native_text, original.target_text)
     if not changed:

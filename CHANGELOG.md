@@ -2,6 +2,31 @@
 
 Versions 0.7.2–0.9.7 below describe local desktop builds first published together in v0.9.8.
 
+## 0.15.3
+
+- Disable Settings Save changes until configuration is edited. Reverting changes, successful saves, and completed model switches clear the unsaved state; failed saves retain edits for retry.
+- Track live noise/appearance previews, language and model choices, storage limits, and learning settings without polling or inference work.
+
+## 0.15.2
+
+- Fix invisible task helpers intercepting Settings tab clicks during ordinary navigation. Task footers now own their controls and occupy their intended layout positions.
+- Verify navigation with real window-level pointer clicks, including task progress, both themes, and display scaling.
+
+## 0.15.1
+
+- Separate live translation model selection from optional AI refinement; choose history only or history and current subtitles.
+- Reuse existing pinned Whisper base caches without another download; distinguish incomplete model files from installed models.
+- Show actual per-sentence speech, translation, refinement, and fallback information behind an accessible info icon. Keep translation history visible and refinement markers compact.
+- Preserve legacy refinement preferences and Qwen ASR backend selection across restarts.
+
+## 0.15.0 — Switch local speech models
+
+- Add Whisper large-v3 and experimental Qwen3-ASR-1.7B alongside Turbo and the CPU base model. Native dropdown rows show download/check icons, accessible installation labels and a separate running marker.
+- Download only after an explicit click, with pinned sizes, checksums, resume and cancellation. Optional speech downloads leave the active recognizer running.
+- Save speech changes through a serialized load-and-transcribe check. The old worker releases its model first; failed checks retain the previous selection and resume the prior recognizer.
+- Run Qwen speech locally through a separate resident, authenticated loopback CrispASR CPU/Vulkan process. Existing Qwen3-4B text translation and learning remain separate.
+- Fix the bundled benchmark fixture's missing Path import. Add regression coverage for dropdown stability, downloads, switching, rollback and GPU confirmation.
+
 ## 0.14.1 — Models interaction and layout fix
 
 - Fix an empty sibling widget intercepting mouse input on Settings → Models. Construct overview and component pages with correct widget ownership instead of moving raw layout items.

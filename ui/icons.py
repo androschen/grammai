@@ -33,6 +33,10 @@ class LineIcon(QIconEngine):
         elif n=='sliders':
             for y,x in ((6,9),(12,16),(18,7)):
                 line(3,y,x-2,y);line(x+2,y,21,y);p.drawEllipse(QRectF(x-2,y-2,4,4))
+        elif n=='download':
+            line(12,3,12,15);line(7,10,12,15);line(12,15,17,10);line(4,16,4,21);line(4,21,20,21);line(20,21,20,16)
+        elif n=='check':
+            line(5,12,10,17);line(10,17,20,6)
         elif n=='shield-check':
             from PySide6.QtGui import QPainterPath
             path=QPainterPath();path.moveTo(12,3);path.lineTo(20,6);path.lineTo(19,14);path.quadTo(17,19,12,22);path.quadTo(7,19,5,14);path.lineTo(4,6);path.closeSubpath();p.drawPath(path)

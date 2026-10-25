@@ -42,7 +42,9 @@ class ReviewWorker(QThread):
             update=revised_update(original,native_text=native,target_text=translated,
                 phonetics=phonetics_auto(translated),native_phonetics=phonetics_auto(native),
                 source_language=source,target_language=target,
-                translation_status='same_language' if source==target else 'translated')
+                translation_status='same_language' if source==target else 'translated',
+                translation_model='NLLB-200 600M',translation_backend='CPU / int8',translation_fallback='',refinement_model='',refinement_backend='',
+                **(engine.speech_identity() if engine is not None else {}))
             if not self.isInterruptionRequested():
                 self.result.emit({'update':update,'id':original.uid,
                     'requires_confirmation':bool(self.request.get('recheck')),

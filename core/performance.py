@@ -47,7 +47,7 @@ class PerformanceMonitor(QObject):
         self.markers.append((monotonic(), name))
 
     def _status(self, text):
-        if text.startswith('Loading Whisper'):
+        if text.startswith(('Loading Whisper','Loading speech model','Checking selected speech')):
             self._activity('Model loading')
 
     def sample(self):

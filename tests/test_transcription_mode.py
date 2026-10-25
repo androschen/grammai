@@ -48,7 +48,7 @@ class TranscriptionModeTests(unittest.TestCase):
                 self.closes=0
             def configure(self,config):
                 pass
-            def ensure_loaded(self):
+            def ensure_loaded(self,**kwargs):
                 self.loads+=1
             def ensure_translator(self):
                 pass

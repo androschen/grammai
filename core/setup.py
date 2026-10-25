@@ -29,7 +29,8 @@ def select_configuration(config,speech,processing,ai=False,fast=False):
 
 
 def required_components(speech,processing,ai,fast=False,backup=False):
-    ids=['speech-cpu'] if speech=='speech-cpu' else ['speech-turbo','speech-runtime']
+    from core.speech_models import components
+    ids=list(components(speech))
     if backup and 'speech-cpu' not in ids:ids.append('speech-cpu')
     if ai:ids.extend(['qwen','ai-cpu' if processing=='cpu' else 'ai-vulkan'])
     if ai and backup and processing!='cpu':ids.append('ai-cpu')
@@ -60,14 +61,15 @@ def test_configuration(config,progress=lambda m,p:None,cancelled=lambda:False):
             if cancelled():raise InterruptedError('Cancelled')
             tick=perf_counter();engine._transcribe(audio,'transcribe');timings.append((perf_counter()-tick)*1000);progress('Measuring speech '+str(i+1)+'/3',20+15*i)
         result=dict(backend=engine.active_backend,speech_ms=median(timings),audio_seconds=len(audio)/16000,loading_and_test_seconds=perf_counter()-start)
-        if c.analysis_enabled or c.translation_mode in ('context','review'):
+        from core.model_info import refinement_enabled
+        if c.analysis_enabled or c.translation_mode=='context' or refinement_enabled(c):
             ai.ensure_loaded(c,lambda message:progress(message,75),cancelled)
             ai.complete_json({'messages':[{'role':'user','content':'Reply with the JSON object {"ready":true} only.'}],'max_tokens':24,'chat_template_kwargs':{'enable_thinking':False}}, {'type':'object','properties':{'ready':{'type':'boolean'}},'required':['ready'],'additionalProperties':False},cancelled)
             result['ai_status']=ai.status
             if c.translation_mode=='context':
                 from ml.qwen_translator import QwenTranslator
                 tick=perf_counter();result['translation_example']=QwenTranslator(c,ai).translate('The meeting starts at three in the afternoon.','en','id',cancelled=cancelled);result['translation_ms']=(perf_counter()-tick)*1000
-        if c.translation_enabled and c.translation_mode=='fast':
+        if c.translation_enabled and c.translation_mode in ('fast','review'):
             from ml.translator import NllbTranslator
             translator=NllbTranslator(c)
             try:
@@ -88,6 +90,9 @@ def validate_selection(config):
     if config.speech_model_id=='external' and config.processing_mode=='gpu' and config.backend!='vulkan':raise ValueError('Choose a GPU-compatible speech model, or use CPU processing.')
     if config.speech_model_id=='speech-cpu' and not resolve('speech-cpu'):raise ValueError('Install the selected CPU speech model in Manage components first.')
     if config.speech_model_id=='speech-turbo' and (not resolve('speech-runtime') or not resolve('speech-turbo')):raise ValueError('Install the selected speech model and runtime in Manage components first.')
+    if config.speech_model_id in ('speech-large','speech-qwen'):
+        from core.speech_models import configure
+        configure(config,config.speech_model_id)
     if config.learning_model_id=='qwen':
         runtime=resolve('ai-cpu') if config.processing_mode=='cpu' else resolve('ai-vulkan') or (resolve('ai-cpu') if config.processing_mode=='auto' else None)
         if not resolve('qwen') or not runtime:raise ValueError('Install the selected local AI model and matching runtime first.')

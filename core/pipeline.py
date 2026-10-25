@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import replace
+from dataclasses import replace,fields
 from pathlib import Path
 from queue import Empty, Queue
 from time import monotonic
@@ -49,10 +49,10 @@ class InferenceWorker(QThread):
             self.engine._translator.cancelled=self.isInterruptionRequested
         self.engine.configure(self.config)
         try:
-            self.events.status_changed.emit(f"Loading Whisper {self.config.model_size} ({self.config.backend})…")
-            self.engine.ensure_loaded()
+            self.events.status_changed.emit(f"Loading speech model ({self.config.speech_model_id if self.config.speech_model_id!='external' else self.config.model_size})…")
+            self.engine.ensure_loaded(cancelled=self.isInterruptionRequested)
         except Exception as exc:
-            self.events.status_changed.emit(f"Whisper unavailable: {exc}. Use Retry models.")
+            self.events.status_changed.emit(f"Speech recognition unavailable: {exc}. Use Retry models.")
             return
         if self.isInterruptionRequested():
             return
@@ -178,11 +178,42 @@ class TranslationPipeline(QObject):
         self._benchmark = None
         self._benchmark_pending = None
         events.benchmark_requested.connect(self.request_benchmark)
+        self._switch_pending=None;self._switch=None;self._switch_request=None
+        events.speech_switch_requested.connect(self.request_speech_switch)
+        events.setProperty('speech_switch_available',True)
         self._state = config.snapshot()
         self._timer = QTimer(self)
         self._timer.setInterval(50)
         self._timer.timeout.connect(self._reconcile)
         self._timer.start()
+
+    @Slot(object)
+    def request_speech_switch(self,request):
+        from ui.model_setup import active_jobs
+        service=getattr(self._events,'analysis_service',None)
+        blocked=(self._closing or self._switch_pending is not None or self._switch is not None or active_jobs() or self._review is not None or self._review_pending is not None or self._benchmark is not None or self._benchmark_pending is not None or self._events.property('comparison_busy') or (service and service.busy))
+        if blocked:
+            self._events.speech_switch_finished.emit({'token':request['token'],'error':'Finish the active model task before switching speech models.'});return
+        self._switch_pending=replace(request['config']);self._switch_request=request
+        self._events.setProperty('speech_switch_busy',True)
+        self._events.status_changed.emit('Checking selected speech model…')
+        if self._worker:self._worker.stop()
+
+    def _finish_speech_switch(self):
+        worker=self._switch;request=self._switch_request;self._switch=None;self._switch_request=None
+        error=worker.error
+        if not error and not self._closing:
+            for field in fields(worker.config):setattr(self._config,field.name,getattr(worker.config,field.name))
+            self._events.state_changed.emit(self._config.snapshot())
+            self._events.overlay_toggled.emit(self._config.show_overlay)
+        else:
+            self._engine.configure(replace(self._config))
+        if not self._want_inference or self._closing:self._engine.close()
+        worker.deleteLater();self._events.setProperty('speech_switch_busy',False)
+        result={'token':request['token']}
+        if error or self._closing:result['error']=error or 'Switch cancelled during shutdown.'
+        self._events.speech_switch_finished.emit(result)
+        self._events.status_changed.emit('Speech switch failed; previous model retained. '+error if error else 'Speech model selected successfully.')
 
     @property
     def inference_requested(self):
@@ -194,6 +225,7 @@ class TranslationPipeline(QObject):
 
     @property
     def active_backend(self):
+        if self._switch is not None or self._switch_pending is not None:return "Switching speech model"
         if self._review is not None:
             return "Retranslating text"
         if self._benchmark is not None:
@@ -208,7 +240,8 @@ class TranslationPipeline(QObject):
         backend=getattr(self._engine,'active_backend','')
         if 'backup' in backend:return 'Whisper base (CPU backup)'
         if config.speech_model_id=='speech-cpu':return 'Whisper base'
-        if config.speech_model_id=='speech-turbo':return 'Whisper large-v3-turbo'
+        from core.speech_models import TITLES
+        if config.speech_model_id in TITLES:return TITLES[config.speech_model_id]
         return config.model_size if config.backend == "cpu" else Path(config.vulkan_model).name
 
     @property
@@ -221,14 +254,14 @@ class TranslationPipeline(QObject):
 
     @property
     def model_tasks_idle(self):
-        return (not self._closing and not self._want_inference and self._worker is None
+        return (self._switch is None and self._switch_pending is None and not self._closing and not self._want_inference and self._worker is None
             and self._review is None and self._review_pending is None
             and self._benchmark is None and self._benchmark_pending is None)
 
     @Slot(object)
     def request_benchmark(self, config):
         from ui.model_setup import active_jobs
-        if active_jobs():
+        if active_jobs() or self._events.property('speech_switch_busy'):
             self._events.benchmark_progress.emit('Finish or cancel model setup first.');return
         if self._events.property('comparison_busy'):
             self._events.benchmark_progress.emit('Finish or cancel translator comparison first.')
@@ -244,7 +277,7 @@ class TranslationPipeline(QObject):
 
     @Slot(object)
     def request_review(self,request):
-        if self._events.property('comparison_busy'):
+        if self._events.property('comparison_busy') or self._events.property('speech_switch_busy'):
             self._events.review_finished.emit({'id':request['update'].uid,'error':'Finish or cancel translator comparison first.'})
             return
         analysis=getattr(self._events,'analysis_service',None)
@@ -313,7 +346,7 @@ class TranslationPipeline(QObject):
 
     def start_inference(self):
         from ui.model_setup import active_jobs
-        if active_jobs():
+        if active_jobs() or self._events.property('speech_switch_busy'):
             self._events.status_changed.emit('Finish or cancel model setup before starting live translation.');self.inference_failed.emit();return
         if self._events.property('comparison_busy'):
             self._events.status_changed.emit('Finish or cancel translator comparison before starting live subtitles.')
@@ -357,6 +390,10 @@ class TranslationPipeline(QObject):
     def stop(self):
         self.replays.clear()
         self._review_pending = None
+        if self._switch:self._switch.cancel()
+        if self._switch_pending is not None:
+            self._switch_pending=None;self._events.setProperty('speech_switch_busy',False)
+            self._events.speech_switch_finished.emit({'token':self._switch_request['token'],'error':'Switch cancelled during shutdown.'});self._switch_request=None
         if self._review:
             self._review.requestInterruption()
         if self._benchmark:
@@ -370,6 +407,8 @@ class TranslationPipeline(QObject):
     def _publish(self, update,audio,captured_at):
         if self.sender() is self._worker and self._want_inference and not self._worker.stop_requested:
             key=self.replays.add(update.uid,audio,captured_at-len(audio)/self._config.sample_rate)
+            if update.translation_model and update.translation_status!='unavailable':
+                self._events.setProperty('last_translation_info',{'model':update.translation_model,'backend':update.translation_backend,'fallback':update.translation_fallback,'status':update.translation_status})
             self._events.subtitle_ready.emit(replace(update,audio_id=key))
 
     @Slot(object)
@@ -426,6 +465,12 @@ class TranslationPipeline(QObject):
                         self._worker.stop()
             elif getattr(self._capture, "stop_requested", False):
                 return
+        if self._switch is not None:
+            if not self._switch.isFinished():return
+            self._finish_speech_switch()
+        if self._switch_pending is not None and self._worker is None:
+            from core.speech_switch import SpeechSwitchWorker
+            self._switch=SpeechSwitchWorker(self._engine,self._switch_pending);self._switch_pending=None;self._switch.start();return
         if self._closing:
             if self._worker is None and self._capture is None:
                 self._timer.stop()

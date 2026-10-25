@@ -42,6 +42,8 @@ QPushButton#iconButton:hover, QPushButton#iconButton:checked {{ background: {was
 QPushButton#secondary {{ background: transparent; border: none; padding: 5px 8px; color: {muted}; }}
 QPushButton#secondary:hover {{ background: {soft}; color: {ink}; }}
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{ background: {surface}; border: 1px solid {line}; border-radius: 8px; padding: 7px 10px; min-height: 20px; selection-background-color: {wash}; selection-color: {ink}; }}
+QProgressBar#speechDownloadProgress {{ background: {line}; border: none; border-radius: 2px; }}
+QProgressBar#speechDownloadProgress::chunk {{ background: {accent}; border: none; border-radius: 2px; }}
 QProgressBar#cardAudioProgress {{ background: {line}; border: none; border-radius: 2px; min-height: 5px; max-height: 5px; }}
 QProgressBar#cardAudioProgress::chunk {{ background: {accent}; border: none; border-radius: 2px; }}
 QComboBox {{ padding-right: 28px; }}

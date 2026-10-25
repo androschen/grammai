@@ -26,7 +26,7 @@ def settle(predicate):
 class ModularSetupTests(unittest.TestCase):
     def setUp(self):
         self.windows=set(APP.topLevelWidgets())
-        self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name);self.env=patch.dict(os.environ,GRAMMAI_DATA_DIR=self.temp.name);self.env.start()
+        self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name);self.env=patch.dict(os.environ,GRAMMAI_DATA_DIR=self.temp.name,GRAMMAI_MODELS_DIR=str(self.folder/'models'),HF_HUB_CACHE=str(self.folder/'cache'));self.env.start();self.home=patch('pathlib.Path.home',return_value=self.folder);self.home.start()
     def tearDown(self):
         from ui.model_setup import active_jobs,cancel_jobs
         cancel_jobs();settle(lambda:not active_jobs())
@@ -34,7 +34,7 @@ class ModularSetupTests(unittest.TestCase):
             if widget not in self.windows and widget.parentWidget() is None:widget.close();widget.deleteLater()
         from PySide6.QtCore import QCoreApplication,QEvent
         QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        self.env.stop();self.temp.cleanup()
+        self.home.stop();self.env.stop();self.temp.cleanup()
     def test_devices_accept_amd_intel_nvidia_and_preference(self):
         devices=vulkan_devices('Vulkan0: Intel Arc\nVulkan1: NVIDIA RTX\nVulkan2: AMD Radeon')
         self.assertEqual(len(devices),3);self.assertEqual(select_device(devices,'Vulkan1')['name'],'NVIDIA RTX');self.assertIsNone(select_device([]))
