@@ -2,7 +2,7 @@
 
 Learn languages from real conversations, locally on Windows.
 
-**[Download v0.16.0](https://github.com/androschen/grammai/releases/tag/v0.16.0)** · [Windows setup](WINDOWS.md) · [User guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
+**[Download v0.16.1](https://github.com/androschen/grammai/releases/tag/v0.16.1)** · [Windows setup](WINDOWS.md) · [User guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
 
 ![GrammAI learning deck with conversation examples and pronunciation](docs/images/grammai-desktop.png)
 

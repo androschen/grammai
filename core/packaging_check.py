@@ -22,6 +22,9 @@ def smoke_check(report,verify_models=False):
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import Qt
         results['imports']='ok'
+        from core.downloads import ATTEMPTS,TIMEOUT
+        assert ATTEMPTS==5 and TIMEOUT==30
+        results['download_recovery']='ok'
         results['chinese_pronunciation']=bool(phonetics_auto('\u4f60\u597d'))
         results['thai_pronunciation']=bool(phonetics_auto('\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35'))
         results['vad_silence']=StreamingSpeechDetector()(np.zeros(640,dtype=np.float32))<.5

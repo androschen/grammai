@@ -40,28 +40,9 @@ def sha256(path, cancelled=lambda: False):
 
 
 def download(url, path, expected_bytes, expected_sha, progress, cancelled):
-    path = Path(path)
-    if path.is_file() and path.stat().st_size == expected_bytes:
-        progress('Checking existing ' + path.name, 0)
-        if sha256(path, cancelled) == expected_sha:
-            return
-    partial = path.with_suffix(path.suffix + '.part')
-    request = urllib.request.Request(url, headers={'User-Agent': 'GrammAI-local-setup'})
-    digest, count = hashlib.sha256(), 0
-    # Downloads are explicit setup operations; analysis itself has no external requests.
-    with urllib.request.urlopen(request, timeout=30) as response, partial.open('wb') as stream:
-        while block := response.read(1024 * 1024):
-            if cancelled():
-                raise InterruptedError('Download cancelled. Restart setup to download again.')
-            count += len(block)
-            if count > expected_bytes:
-                raise ValueError('Unexpected download size; installation stopped.')
-            stream.write(block)
-            digest.update(block)
-            progress(path.name, min(100, int(count * 100 / expected_bytes)))
-    if count != expected_bytes or digest.hexdigest() != expected_sha:
-        raise ValueError('Checksum/size mismatch. File was not installed; retry setup.')
-    partial.replace(path)
+    from core.components import Asset
+    from core.downloads import download_verified
+    return download_verified(Asset(Path(path).name,url,expected_bytes,expected_sha),path,progress,cancelled)
 
 
 def install(progress=lambda message, percent: None, cancelled=lambda: False, root=None):

@@ -2,6 +2,12 @@
 
 Versions 0.7.2–0.9.7 below describe local desktop builds first published together in v0.9.8.
 
+## 0.16.1
+
+- Retry interrupted model/runtime transfers up to five attempts, resuming verified-size partial downloads with cancellable backoff.
+- Retain bytes from interrupted reads and identify the failed file and download host with actionable retry guidance.
+- Share recovery between model management and legacy learning setup while preserving SHA-256 checks, strict resume validation and normal TLS verification.
+
 ## 0.16.0
 
 - Organize Models settings by Transcription, live Translation, and Learning assistant, with direct downloads and shared Qwen weights.

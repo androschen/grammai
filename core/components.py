@@ -58,31 +58,8 @@ def digest(path,cancelled=lambda:False):
 
 
 def fetch(asset,path,progress=lambda m,p:None,cancelled=lambda:False):
-    path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
-    if path.is_file() and path.stat().st_size==asset.size and digest(path,cancelled)==asset.sha:return
-    part=path.with_suffix(path.suffix+'.part')
-    offset=part.stat().st_size if part.exists() else 0
-    if offset>asset.size:part.unlink();offset=0
-    if offset==asset.size:
-        if digest(part,cancelled)==asset.sha:part.replace(path);return
-        part.unlink();offset=0
-    headers={'User-Agent':'GrammAI-component-setup'}
-    if offset:headers['Range']=f'bytes={offset}-'
-    with urllib.request.urlopen(urllib.request.Request(asset.url,headers=headers),timeout=10) as response:
-        resumed=offset and response.status==206
-        if resumed and not response.headers.get('Content-Range','').startswith(f'bytes {offset}-'):raise ValueError('Invalid resume response; retry the download.')
-        if not resumed:offset=0
-        with part.open('ab' if resumed else 'wb') as f:
-            while block:=response.read(1024*1024):
-                if cancelled():raise InterruptedError('Cancelled; download can be resumed.')
-                offset+=len(block)
-                if offset>asset.size:raise ValueError('Unexpected component size')
-                f.write(block);progress(asset.name,min(99,int(100*offset/asset.size)))
-            f.flush();os.fsync(f.fileno())
-    if offset!=asset.size:raise ValueError('Download incomplete; retry to resume.')
-    if digest(part,cancelled)!=asset.sha:
-        part.unlink();raise ValueError('Checksum mismatch; file was not activated.')
-    part.replace(path)
+    from core.downloads import download_verified
+    return download_verified(asset,path,progress,cancelled)
 
 
 class ComponentManager:
