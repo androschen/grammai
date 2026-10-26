@@ -33,7 +33,7 @@ def required_components(speech,processing,ai,fast=False,backup=False):
     ids=list(components(speech))
     if backup and 'speech-cpu' not in ids:ids.append('speech-cpu')
     if ai:ids.extend(['qwen','ai-cpu' if processing=='cpu' else 'ai-vulkan'])
-    if ai and backup and processing!='cpu':ids.append('ai-cpu')
+    if ai and (processing=='auto' or (backup and processing!='cpu')):ids.append('ai-cpu')
     if fast:ids.append('translation-fast')
     return list(dict.fromkeys(ids))
 
@@ -88,8 +88,8 @@ def test_configuration(config,progress=lambda m,p:None,cancelled=lambda:False):
 def validate_selection(config):
     from core.components import resolve
     if config.speech_model_id=='external' and config.processing_mode=='gpu' and config.backend!='vulkan':raise ValueError('Choose a GPU-compatible speech model, or use CPU processing.')
-    if config.speech_model_id=='speech-cpu' and not resolve('speech-cpu'):raise ValueError('Install the selected CPU speech model in Manage components first.')
-    if config.speech_model_id=='speech-turbo' and (not resolve('speech-runtime') or not resolve('speech-turbo')):raise ValueError('Install the selected speech model and runtime in Manage components first.')
+    if config.speech_model_id=='speech-cpu' and not resolve('speech-cpu'):raise ValueError('Install the selected CPU speech model in Manage models first.')
+    if config.speech_model_id=='speech-turbo' and (not resolve('speech-runtime') or not resolve('speech-turbo')):raise ValueError('Install the selected speech model and runtime in Manage models first.')
     if config.speech_model_id in ('speech-large','speech-qwen'):
         from core.speech_models import configure
         configure(config,config.speech_model_id)
@@ -101,3 +101,7 @@ def validate_selection(config):
 
 def assess_realtime(result):
     return result['speech_ms']+result.get('translation_ms',0)<result['audio_seconds']*1000
+
+
+def learning_components(processing):
+    return ['qwen','ai-cpu'] if processing=='cpu' else ['qwen','ai-vulkan','ai-cpu'] if processing=='auto' else ['qwen','ai-vulkan']

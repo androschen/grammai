@@ -27,6 +27,7 @@ class WhisperEngine:
         self.last_timings = {}
         self.last_translation_model="";self.last_translation_backend="";self.last_translation_fallback=""
         self.active_backend = "Not loaded"
+        self.fallback_reason=''
         self.activity_callback = None
         self._overlap_seconds=0.
         self._previous_native=''
@@ -60,9 +61,10 @@ class WhisperEngine:
             from ml.qwen_asr import QwenASR
             self._vulkan=QwenASR(config)
             try:self._vulkan.start(cancelled=cancelled)
-            except Exception:
+            except Exception as exc:
                 self.close()
                 if cancelled() or config.processing_mode!='auto':raise
+                self.fallback_reason='GPU startup failed: '+str(exc)[:400]
                 self._vulkan=QwenASR(config)
                 try:self._vulkan.start(cpu_only=True,cancelled=cancelled)
                 except Exception:self.close();raise
@@ -83,6 +85,7 @@ class WhisperEngine:
                 self.close()
                 if cancelled():raise InterruptedError('Cancelled') from exc
                 used_backup=True
+                self.fallback_reason='GPU startup failed: '+str(exc)[:400]
                 if config.processing_mode!='auto' or managed_cpu is None:raise RuntimeError('GPU speech could not start. Open Models to retry or select an installed CPU model. '+str(exc)) from exc
                 if self.activity_callback:self.activity_callback('GPU unavailable; using installed Whisper base CPU backup. Quality may differ.')
             else:
@@ -116,9 +119,16 @@ class WhisperEngine:
         self._model = None
         self._loaded_size = None
         self.active_backend = "Not loaded"
+        self.fallback_reason=''
         self._previous_native=''
         self._previous_language=None
         self._overlap_seconds=0.
+
+    @property
+    def processing_note(self):
+        if self.fallback_reason:return self.fallback_reason
+        if self._config.processing_mode=='cpu':return 'CPU only is selected in Settings > Models > Processing.'
+        return ''
 
     def reset_context(self):
         """Forget continuity after missing audio or playback, without reloading models."""

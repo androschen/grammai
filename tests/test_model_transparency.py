@@ -26,9 +26,10 @@ class ModelTransparencyTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name)
         self.env=patch.dict(os.environ,GRAMMAI_DATA_DIR=str(self.folder/'profile'),GRAMMAI_MODELS_DIR=str(self.folder/'models'),HF_HUB_CACHE=str(self.folder/'cache'))
+        self.specs=patch('core.components.catalog',return_value={key:replace(spec,assets=tuple(replace(a,size=7) for a in spec.assets)) if spec.kind!='runtime' else spec for key,spec in catalog().items()});self.specs.start()
         self.env.start();self.home=patch('pathlib.Path.home',return_value=self.folder);self.home.start()
     def tearDown(self):
-        self.home.stop();self.env.stop();self.temp.cleanup()
+        self.specs.stop();self.home.stop();self.env.stop();self.temp.cleanup()
     def dialog(self,config=None):
         with patch('ui.settings.list_audio_sources',return_value=[]):return SettingsDialog(config or AppConfig(),EventBus(),page=3)
     def cached_cpu(self,complete=True):

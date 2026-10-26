@@ -59,12 +59,13 @@ class TaskWidget(QWidget):
                 self.status.setText('Pause translation, then use Manage components → Unload local AI before testing or changing files.');return False
         return True
     def start_job(self,work,callback=None,requires_idle=True):
+        self.show()
         if requires_idle and not self.can_modify():return False
         if not requires_idle and (active_jobs() or (self.events and self.events.property('speech_switch_busy'))):
             self.status.setText('Finish or cancel the active model task first.');return False
-        self._callback=callback;self.progress.setValue(0);self.progress.show();self.cancel.show()
+        self.show();self._callback=callback;self.progress.setValue(0);self.progress.show();self.cancel.show()
         self.job=ModelJob(work);self.job.progress.connect(self._progress);self.job.completed.connect(self._done);self.job.start();return True
-    def _progress(self,message,value):self.status.setText(message);self.progress.setValue(value)
+    def _progress(self,message,value):self.show();self.status.setText(message);self.progress.setValue(value)
     def _done(self,result):
         self.cancel.hide();self.progress.hide();self.job=None
         if result.get('error'):self.status.setText(result['error'])
@@ -75,49 +76,79 @@ class TaskWidget(QWidget):
 
 
 class ComponentsWidget(TaskWidget):
+    """Separate inventory page; model choice stays on the Models overview."""
+    changed=Signal()
     def __init__(self,config,events,parent=None):
-        super().__init__(events,parent);self.config=config;self.manager=ComponentManager()
+        super().__init__(events,parent);self.config=config;self.manager=ComponentManager();self._verified=set()
+        from core.model_management import GROUPS
         box=QVBoxLayout(self);box.setContentsMargins(0,0,0,0);box.setSpacing(12)
         header=QHBoxLayout();self.back=icon_button('back','Back to model settings',self);header.addWidget(self.back)
-        title=QLabel('Manage components');title.setObjectName('field');header.addWidget(title,1);box.addLayout(header)
-        reuse=QPushButton('Find installed models');reuse.clicked.connect(self.discover_existing);box.addWidget(reuse,0,Qt.AlignmentFlag.AlignLeft)
-        # The component list stays visible, matching the approved mock. The
-        # combo remains the selection model for existing import/repair actions.
+        title=QLabel('Manage models');title.setObjectName('field');header.addWidget(title,1)
+        self.total=QLabel();self.total.setObjectName('hint');header.addWidget(self.total);box.addLayout(header)
         self.choice=QComboBox(self);self.choice.setAccessibleName('Component');self.choice.hide()
-        self.cards_box=QVBoxLayout();self.cards_box.setSpacing(8);box.addLayout(self.cards_box)
-        self.cards={}
-        for identifier,spec in catalog().items():
-            card=QFrame();card.setObjectName('componentCard');row=QHBoxLayout(card);row.setContentsMargins(8,6,8,6);row.setSpacing(8)
-            select=QPushButton(spec.title);select.setObjectName('componentSelect');select.setCheckable(True)
-            select.setAccessibleName('Select '+spec.title);select.clicked.connect(lambda checked=False,key=identifier:self.select_component(key))
-            row.addWidget(select,1)
-            state=QLabel();state.setObjectName('badge');row.addWidget(state)
-            verify=icon_button('shield-check','Verify '+spec.title,card);verify.clicked.connect(lambda checked=False,key=identifier:self.verify_component(key));row.addWidget(verify)
-            self.cards[identifier]=(card,select,state,verify);self.cards_box.addWidget(card)
-
-        self.details=QLabel();self.details.setObjectName('hint');self.details.setWordWrap(True);self.details.setTextFormat(Qt.TextFormat.PlainText);box.addWidget(self.details)
-        row=QHBoxLayout();self.install=QPushButton('Install / resume');self.install.setObjectName('primary');self.verify=QPushButton('Verify');self.repair=QPushButton('Repair');self.remove=icon_button('trash','Remove selected managed component',self)
+        self.cards={};self.delete_buttons={};self.group_totals={}
+        for heading,identifiers in GROUPS:
+            label=QLabel(heading);label.setObjectName('field')
+            group_header=QHBoxLayout();group_header.addWidget(label,1)
+            total=QLabel();total.setObjectName('hint');group_header.addWidget(total);self.group_totals[heading]=total
+            target=box
+            if heading=='Supporting runtimes':
+                toggle=QPushButton('Supporting runtimes');toggle.setCheckable(True)
+                runtimes=QWidget();target=QVBoxLayout(runtimes);target.setContentsMargins(0,0,0,0)
+                toggle.toggled.connect(runtimes.setVisible);box.addWidget(toggle);box.addWidget(runtimes);runtimes.hide()
+            target.addLayout(group_header)
+            for identifier in identifiers:
+                spec=catalog()[identifier]
+                card=QFrame();card.setObjectName('componentCard');row=QHBoxLayout(card);row.setContentsMargins(12,8,12,8);row.setSpacing(8)
+                select=QPushButton(spec.title);select.setObjectName('componentSelect');select.setCheckable(True)
+                select.setAccessibleName('Select '+spec.title);select.clicked.connect(lambda checked=False,key=identifier:self.select_component(key));row.addWidget(select,1)
+                state=QLabel();state.setObjectName('hint');row.addWidget(state)
+                verify=icon_button('shield-check','Verify '+spec.title,card);verify.clicked.connect(lambda checked=False,key=identifier:self.verify_component(key));row.addWidget(verify)
+                delete=icon_button('trash','Delete '+spec.title,card);delete.clicked.connect(lambda checked=False,key=identifier:self.delete_selected(key));row.addWidget(delete)
+                self.cards[identifier]=(card,select,state,verify);self.delete_buttons[identifier]=delete;target.addWidget(card)
+        self.details=QLabel();self.details.setObjectName('hint');self.details.setWordWrap(True);self.details.setTextFormat(Qt.TextFormat.PlainText)
+        self.advanced=QWidget();advanced=QVBoxLayout(self.advanced);advanced.setContentsMargins(0,0,0,0);advanced.addWidget(self.details)
+        toggle=QPushButton('Advanced');toggle.setCheckable(True);toggle.toggled.connect(self.advanced.setVisible);box.addWidget(toggle);box.addWidget(self.advanced);self.advanced.hide()
+        row=QHBoxLayout();self.install=QPushButton('Download / resume');self.install.setObjectName('primary');self.verify=QPushButton('Verify');self.repair=QPushButton('Repair');self.remove=icon_button('trash','Delete or disconnect selected model',self)
         for b in (self.install,self.verify,self.repair,self.remove):row.addWidget(b)
-        box.addLayout(row)
-        files=QHBoxLayout();self.import_file=QPushButton('Use existing file');self.location=QPushButton('Change model location');files.addWidget(self.import_file);files.addWidget(self.location);box.addLayout(files)
-        self.folder=QLabel();self.folder.setObjectName('hint');self.folder.setWordWrap(True);self.folder.setTextFormat(Qt.TextFormat.PlainText);box.addWidget(self.folder)
-        self.unload=QPushButton('Unload local AI');self.unload.clicked.connect(self._unload);box.addWidget(self.unload,0,Qt.AlignmentFlag.AlignLeft)
-        note=QLabel('Model files are separate from the app. Qwen is shared by translation and learning. Windows manages pronunciation voices.');note.setWordWrap(True);note.setObjectName('hint');box.addWidget(note)
+        advanced.addLayout(row)
+        files=QHBoxLayout();self.import_file=QPushButton('Use existing file');self.location=QPushButton('Model location');files.addWidget(self.import_file);files.addWidget(self.location);advanced.addLayout(files)
+        self.folder=QLabel();self.folder.setObjectName('hint');self.folder.setWordWrap(True);self.folder.setTextFormat(Qt.TextFormat.PlainText);advanced.addWidget(self.folder)
+        self.unload=QPushButton('Unload local AI');self.unload.clicked.connect(self._unload);advanced.addWidget(self.unload,0,Qt.AlignmentFlag.AlignLeft)
+        reuse=QPushButton('Find existing models');reuse.clicked.connect(self.discover_existing);box.addWidget(reuse,0,Qt.AlignmentFlag.AlignLeft)
         self.task_footer(box);box.addStretch()
         self.choice.currentIndexChanged.connect(self.describe)
         self.install.clicked.connect(lambda:self.operation('install'));self.verify.clicked.connect(lambda:self.operation('verify'));self.repair.clicked.connect(lambda:self.operation('repair'));self.remove.clicked.connect(self.delete_component);self.import_file.clicked.connect(self.import_component);self.location.clicked.connect(self.move)
         self.refresh()
+    @staticmethod
+    def format_size(value):return f'{value/1e9:.2f} GB' if value>=1e9 else f'{value/1e6:.0f} MB'
     def refresh(self):
+        from core.model_management import GROUPS,storage_bytes,usage
+        from ui.icons import set_button_icon
         selected=self.choice.currentData();self.choice.blockSignals(True);self.choice.clear()
-        for identifier,spec in catalog().items():
-            try:path=self.manager.path(identifier)
-            except ValueError as exc:self.status.setText(str(exc));path=None
-            self.choice.addItem(spec.title+(' · installed' if path else ' · not installed'),identifier)
-            card,button,state,verify=self.cards[identifier]
-            button.setText(spec.title+'\n'+', '.join(spec.roles)+f' · {spec.size/1e6:.0f} MB')
-            availability=self.manager.availability(identifier)
-            state.setText({'installed':'Installed','incomplete':'Missing files','missing':'Available'}[availability]);verify.setEnabled(availability=='installed')
-
+        try:
+            records=self.manager.records();sizes={key:storage_bytes(key,self.manager) for key in catalog()}
+            self.total.setText(self.format_size(sum(size for key,size in sizes.items() if records.get(key,{}).get('managed')))+' managed')
+            for heading,ids in GROUPS:self.group_totals[heading].setText(self.format_size(sum(sizes[key] for key in ids)))
+            for identifier,spec in catalog().items():
+                path=self.manager.path(identifier);availability=self.manager.availability(identifier);record=records.get(identifier,{})
+                self.choice.addItem(spec.title,identifier)
+                card,button,state,verify=self.cards[identifier]
+                reasons=usage(identifier,self.config,self.manager)
+                location='Managed' if record.get('managed') else 'External file' if path else 'Not downloaded'
+                detail=', '.join(reasons) if reasons else location
+                button.setText(spec.title+'\n'+detail);button.setToolTip(str(path or 'Download size: '+self.format_size(spec.size)))
+                labels={'installed':'Files detected','incomplete':'Incomplete','missing':'Missing files' if record.get('managed') else 'Not downloaded'}
+                state.setText(('Verified' if identifier in self._verified and availability=='installed' else labels[availability])+'\n'+self.format_size(sizes[identifier] if path else spec.size))
+                state.setToolTip('File detection does not confirm CPU/GPU compatibility. Test the selected setup in model settings.')
+                verify.setEnabled(availability=='installed')
+                delete=self.delete_buttons[identifier];delete.setEnabled(True)
+                delete.setAccessibleName(('Delete ' if record.get('managed') else 'Disconnect ' if path else 'Download ')+spec.title)
+                delete.setToolTip(('Delete model' if record.get('managed') else 'Disconnect · original files stay' if path else 'Download model and required runtime'))
+                set_button_icon(delete,'trash' if record.get('managed') else 'close' if path else 'download')
+        except (ValueError,OSError) as exc:
+            self.status.setText('Inventory unavailable: '+str(exc))
+            for delete in self.delete_buttons.values():delete.setEnabled(False)
         self.choice.setCurrentIndex(max(0,self.choice.findData(selected)));self.choice.blockSignals(False);self.describe()
     def select_component(self,identifier):
         self.choice.setCurrentIndex(self.choice.findData(identifier));self.describe()
@@ -128,20 +159,34 @@ class ComponentsWidget(TaskWidget):
         if not identifier:return
         spec=catalog()[identifier]
         for key,(_,button,_,_) in self.cards.items():button.setChecked(key==identifier)
-        try:record=self.manager.records().get(identifier,{});path=self.manager.path(identifier)
-        except ValueError as exc:self.status.setText(str(exc));return
+        try:record=self.manager.records().get(identifier,{});path=self.manager.path(identifier);availability=self.manager.availability(identifier)
+        except (ValueError,OSError) as exc:self.status.setText(str(exc));return
         state='Managed installation' if record.get('managed') else 'External files · retained in place' if path else 'Download required'
         self.details.setText(spec.title+f' · {state}\n{spec.size/1e6:.1f} MB download · {spec.publisher}\nLicense: {spec.license} · used by '+', '.join(spec.roles))
         self.details.setToolTip(str(path or 'Pinned version: '+spec.version));self.folder.setText('Model folder: '+str(self.manager.root))
         service=getattr(self.events,'analysis_service',None) if self.events else None
         self.unload.setVisible(bool(service and service.runtime.loaded))
-        self.remove.setEnabled(bool(record.get('managed')));self.verify.setEnabled(bool(path));self.repair.setEnabled(bool(record));self.install.setEnabled(not bool(path) and not bool(record.get('managed')))
+        self.remove.setEnabled(bool(path or record.get('managed')));self.verify.setEnabled(availability=='installed');self.repair.setEnabled(bool(record.get('managed')));self.install.setEnabled(availability!='installed' and not bool(record.get('managed')))
+    def _finished_inventory(self,result,verified=None):
+        if 'error' not in result:
+            if verified:self._verified.add(verified)
+            self.refresh();self.changed.emit()
     def discover_existing(self):
-        self.start_job(lambda p,c:self.manager.adopt(self.config),lambda result:self.refresh())
+        self.start_job(lambda p,c:self.manager.adopt(self.config),self._finished_inventory)
     def operation(self,name):
         identifier=self.choice.currentData()
-        if name=='repair' and QMessageBox.question(self,'Repair component?','Download and verify a replacement? External originals will be kept.')!=QMessageBox.StandardButton.Yes:return
-        self.start_job(lambda p,c:getattr(self.manager,name)(identifier,p,c),lambda result:self.refresh())
+        if name=='repair' and QMessageBox.question(self,'Repair model?','Download and verify a replacement? External originals will be kept.')!=QMessageBox.StandardButton.Yes:return
+        def work(progress,cancelled):
+            if name=='install':
+                from core.model_management import installation_components
+                for key in installation_components(identifier,self.config.processing_mode):
+                    if cancelled():raise InterruptedError('Cancelled')
+                    if self.manager.availability(key)!='installed':self.manager.install(key,progress,cancelled)
+            else:
+                if name=='verify' and not self.manager.records().get(identifier):self.manager.register(identifier,self.manager.path(identifier))
+                getattr(self.manager,name)(identifier,progress,cancelled)
+        if name!='verify':self._verified.discard(identifier)
+        self.start_job(work,lambda result:self._finished_inventory(result,identifier if name=='verify' else None))
     def import_component(self):
         identifier=self.choice.currentData();spec=catalog()[identifier]
         path,_=QFileDialog.getOpenFileName(self,'Choose '+spec.entry,'','Files ('+spec.entry+')')
@@ -151,27 +196,35 @@ class ComponentsWidget(TaskWidget):
             if spec.kind!='runtime':
                 from core.components import digest
                 for asset in spec.assets:
-                    f=Path(path).parent/asset.name
-                    if not f.is_file() or f.stat().st_size!=asset.size or digest(f,cancelled)!=asset.sha:raise ValueError('File does not match the pinned component. Advanced settings still support custom models.')
+                    file=Path(path).parent/asset.name
+                    if not file.is_file() or file.stat().st_size!=asset.size or digest(file,cancelled)!=asset.sha:raise ValueError('File does not match the pinned component. Advanced settings support custom models.')
             return self.manager.register(identifier,path)
-        self.start_job(work,lambda result:self.refresh())
+        self.start_job(work,self._finished_inventory)
     def _unload(self):
         service=getattr(self.events,'analysis_service',None) if self.events else None
-        if service and service.manage('unload',self.config):self.status.setText('Unloading local AI. Retry your component action when it finishes.')
+        if service and service.manage('unload',self.config):self.status.setText('Unloading local AI. Retry when it finishes.')
         else:self.status.setText('Pause live translation first, or finish the active AI request.')
+    def delete_selected(self,identifier):
+        self.select_component(identifier)
+        if not self.manager.path(identifier) and not self.manager.records().get(identifier,{}).get('managed'):self.operation('install')
+        else:self.delete_component()
     def delete_component(self):
-        identifier=self.choice.currentData()
-        from core.components import resolve
-        referenced=any(Path(value).resolve()==self.manager.path(identifier) for value in (self.config.vulkan_model,self.config.vulkan_executable,self.config.analysis_gguf,self.config.analysis_executable) if value)
-        used=referenced or (identifier==self.config.speech_model_id or (identifier=='qwen-asr-runtime' and self.config.speech_model_id=='speech-qwen') or (identifier=='qwen' and self.config.learning_model_id=='qwen') or (identifier=='translation-fast' and self.config.translation_enabled and self.config.translation_mode=='fast') or (identifier=='speech-runtime' and self.config.speech_model_id in ('speech-turbo','speech-large')) or (identifier in ('ai-cpu','ai-vulkan') and self.config.learning_model_id=='qwen'))
-        if used:self.status.setText('Choose and save another model before removing a selected component.');return
-        if QMessageBox.question(self,'Remove component?','Remove only this managed component? Cards, recordings and external files stay.')!=QMessageBox.StandardButton.Yes:return
-        self.start_job(lambda p,c:self.manager.remove(identifier),lambda result:self.refresh())
+        from core.model_management import usage,storage_bytes,remove_model
+        identifier=self.choice.currentData();record=self.manager.records().get(identifier,{})
+        reasons=usage(identifier,self.config,self.manager)
+        if reasons:
+            answer=QMessageBox.question(self,'Model is still in use','Used by: '+', '.join(reasons)+'\nChoose another model or disable these features and save first. Open model settings?',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No)
+            if answer==QMessageBox.StandardButton.Yes:self.back.click()
+            return
+        managed=record.get('managed');title='Delete model?' if managed else 'Disconnect model?'
+        text=('Recover '+self.format_size(storage_bytes(identifier,self.manager))+'. Required shared runtimes stay.' if managed else 'Remove this model from GrammAI? The original files stay on disk.')+'\nSaved cards, recordings and preferences stay.'
+        if QMessageBox.question(self,title,text)!=QMessageBox.StandardButton.Yes:return
+        self.start_job(lambda p,c:remove_model(identifier,self.config,self.manager),self._finished_inventory)
     def move(self):
         destination=QFileDialog.getExistingDirectory(self,'Choose model folder',str(self.manager.root))
         if not destination:return
-        if QMessageBox.question(self,'Move managed models?','Copy, verify and move managed components to:\n'+destination+'\nExternal models, cards and recordings stay in place.')!=QMessageBox.StandardButton.Yes:return
-        self.start_job(lambda p,c:self.manager.move(destination,p,c),lambda result:self.refresh())
+        if QMessageBox.question(self,'Move managed models?','Copy, verify and move managed models to:\n'+destination+'\nExternal models, cards and recordings stay in place.')!=QMessageBox.StandardButton.Yes:return
+        self.start_job(lambda p,c:self.manager.move(destination,p,c),self._finished_inventory)
 
 
 class SetupDialog(QDialog):
@@ -194,7 +247,7 @@ class SetupDialog(QDialog):
         component=QWidget();box=QVBoxLayout(component);box.setContentsMargins(0,0,4,0);box.setSpacing(12);box.setAlignment(Qt.AlignmentFlag.AlignTop);self.pages.addWidget(component)
         caption=QLabel('Choose what to install');caption.setObjectName('field');box.addWidget(caption)
         self.processing=QComboBox();self.processing.addItem('Automatic · allow installed CPU fallback','auto');self.processing.addItem('CPU only','cpu');self.processing.addItem('GPU preferred · requires a working GPU','gpu');box.addWidget(self.processing)
-        self.speech=QComboBox();self.speech.addItem('Whisper base · compact CPU speech','speech-cpu');self.speech.addItem('Whisper large-v3-turbo · GPU speech','speech-turbo');box.addWidget(self.speech)
+        self.speech=QComboBox();self.speech.addItem('Whisper base · compact CPU speech','speech-cpu');self.speech.addItem('Whisper large-v3-turbo / CPU or GPU','speech-turbo');box.addWidget(self.speech)
         self.ai=QCheckBox('Contextual translation & learning · shared Qwen model');box.addWidget(self.ai)
         self.fast=QCheckBox('Use fast CPU translation · NLLB (instead of contextual AI)');self.fast.setChecked(True);box.addWidget(self.fast)
         self.backup=QCheckBox('Include CPU backups · shared AI weights are reused');box.addWidget(self.backup)
@@ -213,13 +266,16 @@ class SetupDialog(QDialog):
         for w in (self.ai,self.fast,self.backup):w.toggled.connect(self.changed)
         self._gpu_available=False;self.show_step(0)
         self.continue_button.setEnabled(False);self.recommended.setEnabled(False);self.essential.setEnabled(False)
+        from core.readiness import missing_models
+        missing=missing_models(config)
+        if missing:self.task.status.setText('Setup needed: '+', '.join(missing))
         self.changed();self.detect=ModelJob(self.detect_hardware);self.detect.completed.connect(self.detected);self.detect.start()
     def show_step(self,index):
         self.pages.setCurrentIndex(index);self.back.setVisible(index>0);self.continue_button.setVisible(index==0);self.install.setVisible(index==1);self.finish.setVisible(index==2)
         self.steps.setText(('Your PC  →  Components  →  Ready','Your PC  →  [Components]  →  Ready','Your PC  →  Components  →  [Ready]')[index])
     def preset(self,recommended):
         self.recommended.setChecked(recommended);self.essential.setChecked(not recommended)
-        self.speech.setCurrentIndex(1 if recommended and self._gpu_available else 0);self.ai.setChecked(recommended and self._gpu_available);self.fast.setChecked(recommended and not self._gpu_available);self.backup.setChecked(False)
+        self.speech.setCurrentIndex(1 if recommended and self._gpu_available else 0);self.ai.setChecked(recommended and self._gpu_available);self.fast.setChecked(recommended);self.backup.setChecked(False)
         self.changed()
     def detect_hardware(self,progress,cancelled):
         info=system_info()
@@ -233,7 +289,9 @@ class SetupDialog(QDialog):
         self._detect_done=True
         self.continue_button.setEnabled(True);self.recommended.setEnabled(True);self.essential.setEnabled(True)
         info=result.get('value') or {};self.hardware.setText(str(info.get('cpu','CPU'))+' · '+f"{info.get('ram_bytes',0)/1024**3:.0f} GB RAM"+'\n'+('GPU available: '+info['devices'][0]['name'] if info.get('devices') else 'GPU support will be checked after installing a runtime. CPU setup is available.'))
-        self._gpu_available=bool(info.get('devices'))
+        adapters=info.get('display_adapters') or []
+        self._gpu_available=bool(info.get('devices') or adapters)
+        if adapters and not info.get('devices'):self.hardware.setText(self.hardware.text()+'\nDetected: '+', '.join(adapters)+' / GPU support will be verified after runtime installation.')
         self.preset(self.recommended.isChecked())
     def changed(self,*args):
         self.finish.setEnabled(False);self.checked=None

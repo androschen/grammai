@@ -304,8 +304,8 @@ class SettingsContent:
         self._refinement_destination=QComboBox();self._refinement_destination.addItem('History only','history');self._refinement_destination.addItem('History + subtitles','history_subtitles')
         self._refinement_destination.setCurrentIndex(max(0,self._refinement_destination.findData(self._config.refinement_destination)))
         for key,heading,control,caption,icon in (
-            ('speech','Speech recognition',self._speech_choice,'Multilingual transcription','audio'),
-            ('translation','Live translation',self._translation_mode,'Translates the transcript for subtitles and history','route'),
+            ('speech','Transcription',self._speech_choice,'Audio → original speech','audio'),
+            ('translation','Translation',self._translation_mode,'Live subtitle translation','route'),
             ('learning','Learning assistant',self._learning_choice,'Word explanations and replies · on demand','sparkles')):
             section=QFrame();section.setObjectName('modelRoleCard')
             section_box=QHBoxLayout(section);section_box.setContentsMargins(14,12,14,12);section_box.setSpacing(12)
@@ -314,10 +314,21 @@ class SettingsContent:
             body=QVBoxLayout();body.setSpacing(6);header=QHBoxLayout()
             title=QLabel(heading);title.setObjectName('field');header.addWidget(title,1)
             status=QLabel('Not loaded' if key=='speech' else 'On demand');status.setObjectName('badge');header.addWidget(status)
+            info=icon_button('info','About '+heading,section)
+            info.setToolTip({'speech':'Recognizes original speech. Download includes the required runtime. GPU use is confirmed only after a compatibility test.', 'translation':'Translates subtitles. NLLB uses CPU; contextual Qwen shares its model with the learning assistant.', 'learning':'Explains words, context and replies on demand. Qwen is stored once and shared with translation and refinement.'}[key]);header.addWidget(info)
             self._role_status[key]=status;body.addLayout(header);body.addWidget(control)
             detail=QLabel(caption);detail.setObjectName('hint');detail.setWordWrap(True)
             self._role_detail[key]=detail;body.addWidget(detail)
+            if key=='learning':
+                from ui.model_setup import TaskWidget
+                self.learning_download=QPushButton('Download learning AI');self.learning_download.clicked.connect(self._download_learning)
+                body.addWidget(self.learning_download,0,Qt.AlignmentFlag.AlignLeft)
+                self.learning_task=TaskWidget(self._events,self);self.learning_task.task_footer(body);self.learning_task.hide()
             if key=='translation':
+                from ui.model_setup import TaskWidget
+                self.translation_download=QPushButton('Download translation model');self.translation_download.clicked.connect(self._download_translation)
+                body.addWidget(self.translation_download,0,Qt.AlignmentFlag.AlignLeft)
+                self.translation_task=TaskWidget(self._events,self);self.translation_task.task_footer(body);self.translation_task.hide()
                 self._translation_running=QLabel('No translation output this session');self._translation_running.setObjectName('hint');self._translation_running.setWordWrap(True);body.addWidget(self._translation_running)
             if key=='speech':
                 from ui.model_setup import TaskWidget
@@ -325,15 +336,17 @@ class SettingsContent:
                 self.speech_download=QPushButton('Download');set_button_icon(self.speech_download,'download');self.speech_download.setAccessibleName('Download selected speech model');self.speech_download.clicked.connect(self._download_speech)
                 body.addWidget(self.speech_download,0,Qt.AlignmentFlag.AlignLeft)
                 self._speech_running=QLabel('Not running');self._speech_running.setObjectName('hint');self._speech_running.setWordWrap(True);body.addWidget(self._speech_running)
-                self.speech_task=TaskWidget(self._events,self);self.speech_task.progress.setObjectName('speechDownloadProgress');self.speech_task.progress.setTextVisible(False);self.speech_task.progress.setFixedHeight(5);self.speech_task.task_footer(body)
+                self._speech_note=QLabel();self._speech_note.setObjectName('hint');self._speech_note.setWordWrap(True);body.addWidget(self._speech_note)
+                self.try_gpu=QPushButton('Use GPU');self.try_gpu.setToolTip('Select GPU preferred, then Save changes to verify acceleration.');self.try_gpu.clicked.connect(lambda:self._processing.setCurrentIndex(self._processing.findData('gpu')));body.addWidget(self.try_gpu,0,Qt.AlignmentFlag.AlignLeft)
+                self.speech_task=TaskWidget(self._events,self);self.speech_task.progress.setObjectName('speechDownloadProgress');self.speech_task.progress.setTextVisible(False);self.speech_task.progress.setFixedHeight(5);self.speech_task.task_footer(body);self.speech_task.hide()
             section_box.addLayout(body,1);layout.addWidget(section)
             if key=='translation':
-                refinement_card=QFrame();refinement_card.setObjectName('modelRoleCard');refine_box=QVBoxLayout(refinement_card);refine_box.setContentsMargins(14,12,14,12);refine_box.setSpacing(6)
+                refinement_card=QWidget();refine_box=QVBoxLayout(refinement_card);refine_box.setContentsMargins(0,6,0,0);refine_box.setSpacing(6)
                 refine_header=QHBoxLayout();refine_header.addWidget(self._refinement,1)
                 self._refinement_status=QLabel('On demand');self._refinement_status.setObjectName('badge');refine_header.addWidget(self._refinement_status);refine_box.addLayout(refine_header)
                 self._refinement_model=QLabel();self._refinement_model.setObjectName('hint');self._refinement_model.setWordWrap(True);refine_box.addWidget(self._refinement_model)
                 refine_hint=QLabel('Reviews original speech and nearby dialogue to improve the translation.');refine_hint.setObjectName('hint');refine_hint.setWordWrap(True);refine_box.addWidget(refine_hint)
-                refine_box.addWidget(self._refinement_destination);layout.addWidget(refinement_card)
+                refine_box.addWidget(self._refinement_destination);body.addWidget(refinement_card)
                 self._refinement.toggled.connect(self._refinement_destination.setEnabled)
                 self._refinement_destination.setEnabled(self._refinement.isChecked())
         self._selected_models.setObjectName('contextPreview');self._runtime_models.setObjectName('contextPreview')
@@ -370,9 +383,11 @@ class SettingsContent:
         self.component_manager=ComponentsWidget(self._config,self._events,self.component_stack)
         self.component_stack.addWidget(self.component_manager);self.component_stack.setCurrentIndex(0)
         self.component_manager.back.clicked.connect(lambda:self._show_components(False))
-        actions=QHBoxLayout();self.manage_components=QPushButton('Manage components');self.setup_assistant=QPushButton('Setup assistant');self.test_setup=QPushButton('Test setup')
-        for button in (self.manage_components,self.test_setup,self.setup_assistant):actions.addWidget(button)
-        layout.addLayout(actions)
+        actions=QHBoxLayout();self.manage_components=QPushButton('Manage models');self.setup_assistant=QPushButton('Setup assistant');self.test_setup=QPushButton('Test setup')
+        manage_header=QHBoxLayout();manage_header.addStretch();manage_header.addWidget(self.manage_components);layout.insertLayout(0,manage_header)
+        self.component_manager.changed.connect(self._models_inventory_changed)
+        for button in (self.test_setup,self.setup_assistant):actions.addWidget(button)
+        layout.insertLayout(2,actions)
         self.manage_components.clicked.connect(lambda:self._show_components(True));self.setup_assistant.clicked.connect(self._open_setup_assistant);self.test_setup.clicked.connect(self._test_selected_setup)
         self.model_task=TaskWidget(self._events,self);self.model_task.task_footer(layout)
         for control in (self._processing,self._speech_choice,self._learning_choice):control.currentIndexChanged.connect(self._describe_preset)
@@ -405,6 +420,9 @@ class SettingsContent:
         self._retry = QPushButton('Retry model loading')
         self._retry.clicked.connect(self._events.retry_requested.emit)
         layout.addWidget(self._retry)
+
+    def _models_inventory_changed(self):
+        self._speech_choice.refresh();self._describe_preset()
 
     def _show_components(self,opened):
         self.component_stack.setCurrentIndex(1 if opened else 0)
@@ -445,8 +463,63 @@ class SettingsContent:
             self.speech_download.setText('Repair missing files' if partial else 'Download')
             size=sum(catalog()[item].size for item in missing)/1e9
             self._role_detail['speech'].setText(f'{size:.2f} GB download · model and missing runtime'+(' · Experimental' if key=='speech-qwen' else ''))
-        elif key:
+        elif key and key!='external':
             self._role_detail['speech'].setText('Installed'+(' / Experimental' if key=='speech-qwen' else ''))
+        else:self._role_detail['speech'].setText('Custom setup · Test setup to verify compatibility')
+    def _refresh_learning_download(self):
+        if not hasattr(self,'learning_download'):return
+        from core.setup import learning_components
+        from core.components import ComponentManager,catalog
+        manager=ComponentManager();ids=learning_components(self._processing.currentData())
+        missing=[key for key in ids if manager.availability(key)!='installed']
+        custom=self._learning_choice.currentData()=='external' and getattr(self,'_ai_ready',False)
+        self.learning_download.setVisible(bool(missing) and not custom)
+        self.learning_download.setEnabled(not self.learning_task.job)
+        self.learning_download.setText('Download learning AI / '+f'{sum(catalog()[k].size for k in missing)/1e9:.2f} GB')
+
+    def _download_learning(self):
+        from core.setup import learning_components
+        from core.components import ComponentManager
+        manager=ComponentManager();ids=learning_components(self._processing.currentData())
+        missing=[key for key in ids if manager.availability(key)!='installed']
+        def work(progress,cancelled):
+            for key in missing:
+                if cancelled():raise InterruptedError('Download cancelled; retry to resume.')
+                manager.install(key,progress,cancelled)
+        def done(result):
+            if 'error' not in result:
+                self._learning_choice.setCurrentIndex(self._learning_choice.findData('qwen'))
+                self.analysis_settings.enabled.setChecked(True)
+                self.learning_task.status.setText('Installed. Save changes to enable learning AI; the model loads when requested.')
+            self.component_manager.refresh();self._describe_preset()
+        self.learning_task.start_job(work,done,requires_idle=False);self._refresh_learning_download()
+
+    def _translation_components(self):
+        from core.setup import learning_components
+        return learning_components(self._processing.currentData()) if self._translation_mode.currentData()=='context' else ('translation-fast',)
+
+    def _refresh_translation_download(self):
+        if not hasattr(self,'translation_download'):return
+        from core.components import ComponentManager,catalog
+        manager=ComponentManager();missing=[key for key in self._translation_components() if manager.availability(key)!='installed']
+        if self._translation_mode.currentData()=='context' and self._learning_choice.currentData()=='external' and getattr(self,'_ai_ready',False):missing=[]
+        self.translation_download.setVisible(bool(missing));self.translation_download.setEnabled(not self.translation_task.job)
+        self.translation_download.setText('Download / '+f'{sum(catalog()[key].size for key in missing)/1e9:.2f} GB')
+
+    def _download_translation(self):
+        from core.components import ComponentManager
+        manager=ComponentManager();ids=self._translation_components()
+        def work(progress,cancelled):
+            for key in ids:
+                if cancelled():raise InterruptedError('Cancelled; retry to resume.')
+                if manager.availability(key)!='installed':manager.install(key,progress,cancelled)
+        def done(result):
+            if 'error' not in result:
+                if 'qwen' in ids:self._learning_choice.setCurrentIndex(self._learning_choice.findData('qwen'))
+                self.translation_task.status.setText('Files installed. Save changes to apply; no inference started by downloading.')
+            self.component_manager.refresh();self._describe_preset()
+        self.translation_task.start_job(work,done,requires_idle=False);self._refresh_translation_download()
+
     def _download_speech(self):
         from core.components import ComponentManager
         from core.speech_models import components,paths
@@ -471,7 +544,7 @@ class SettingsContent:
         self._speech_choice.refresh();self._load_values();self._revert_threshold=self._config.noise_threshold;self.appearance.restore()
         if self.embedded:
             self._baseline=SettingsContent._draft(self,validate=False);self._gate_dirty=False;self._update_save_state()
-        self._feedback.setText('Saved. Speech model checked and selected.')
+        self._feedback.setText('Saved. Verified: '+result['backend']+(' / '+result['note'] if result.get('note') else '') if result.get('backend') else 'Saved. Speech model checked and selected.')
 
     def _test_selected_setup(self):
         from core.setup import test_configuration
@@ -531,6 +604,14 @@ class SettingsContent:
         self._speech_choice.refresh()
         self._speech_running.setText('Running: '+str(model)+' · '+engine if model and engine not in ('Stopped','Not loaded') else 'Not running')
         self._role_status['speech'].setText('GPU' if engine.startswith('GPU') else 'CPU' if engine.startswith('CPU') else 'Checking' if 'Switching' in engine else 'Idle')
+        last_check=self._events.property('last_speech_check') or {}
+        reason=str(data.get('speech_note') or (last_check.get('note') if engine in ('Stopped','Not loaded') else '') or '')
+        if not reason and self._processing.currentData()=='cpu':reason='CPU only is selected. Choose Automatic or Use GPU to request acceleration.'
+        self._speech_note.setText(reason);self._speech_note.setVisible(bool(reason))
+        if self._speech_choice.currentData() in ('speech-turbo','speech-large','speech-qwen') and 'GPU startup failed' in reason:
+            self.try_gpu.setText('Retry GPU');self.try_gpu.show()
+        else:self.try_gpu.setText('Use GPU')
+        if engine in ('Stopped','Not loaded') and last_check.get('backend'):self._speech_running.setText('Last verified: '+last_check['backend'])
         self._role_status['speech'].setToolTip('Currently running: '+engine+(' · '+model if model else ''))
         ai_status=str(data.get('analysis_status','Unloaded'))
         self._role_status['learning'].setText('Loaded' if 'loaded' in ai_status.lower() and 'unloaded' not in ai_status.lower() else 'Installed' if getattr(self,'_ai_ready',False) else 'Missing files')
@@ -578,14 +659,19 @@ class SettingsContent:
             self._refinement_model.setText(ai_name+' / shared with Learning assistant')
             self._refinement_status.setText('Not needed' if mode=='context' else ('Enabled' if ai_ready else 'Missing files') if self._refinement.isChecked() else 'Off')
             if mode=='context':self._refinement_model.setText(ai_name+' already uses original dialogue for live translation; no extra review pass.')
-            self._role_detail['translation'].setText('Translates original speech for subtitles and history. '+('Uses nearby original dialogue.' if mode=='context' else ''))
+            self._role_detail['translation'].setText('Qwen · shares weights with learning · uses nearby dialogue' if mode=='context' else 'NLLB · live subtitle translation · CPU')
             from core.components import ComponentManager
             translation_ready=ai_ready if mode=='context' else ComponentManager().availability('translation-fast')=='installed'
             self._role_status['translation'].setText(('Installed' if translation_ready else 'Missing files') if self._translation.isChecked() else 'Off')
             self._translation_mode.setItemText(1,ai_name+' / contextual translation')
             self._role_status['learning'].setText('Installed' if ai_ready else 'Missing files')
-            self._role_detail['learning'].setText((gguf.name if self._learning_choice.currentData()=='external' else 'Qwen3 4B')+' · explanations and replies on demand')
-        self._refresh_speech_download()
+            self._role_detail['learning'].setText((gguf.name if self._learning_choice.currentData()=='external' else 'Qwen3 4B')+' · words, context & replies · stored once')
+        self._refresh_speech_download();self._refresh_learning_download();self._refresh_translation_download()
+        self.try_gpu.setVisible(selected in ('speech-turbo','speech-large','speech-qwen') and self._processing.currentData()=='cpu')
+        if self._processing.currentData()=='cpu' and selected in ('speech-turbo','speech-large','speech-qwen'):
+            self._speech_note.setText('CPU only is selected. Use GPU and save to test acceleration.');self._speech_note.show()
+        elif not getattr(self,'_pending_switch',None):
+            self._speech_note.hide()
         if selected!='external':
             self._preset_help.setText('The selected model stays unchanged. Decoding effort changes how much inference work is done. Save changes to apply.');return
         if gpu:
@@ -625,13 +711,13 @@ class SettingsContent:
         from core.components import resolve
         if c.speech_model_id=='speech-cpu':
             c.backend='cpu'
-            if validate and not resolve('speech-cpu'):raise ValueError('Install the selected CPU speech model in Manage components first.')
+            if validate and not resolve('speech-cpu'):raise ValueError('Install the selected CPU speech model in Manage models first.')
         elif c.speech_model_id=='speech-turbo':
             c.backend='cpu' if c.processing_mode=='cpu' else 'vulkan'
             runtime,model=resolve('speech-runtime'),resolve('speech-turbo')
             if runtime:c.vulkan_executable=str(runtime)
             if model:c.vulkan_model=str(model)
-            if validate and (not runtime or not model):raise ValueError('Install the selected speech model and runtime in Manage components first.')
+            if validate and (not runtime or not model):raise ValueError('Install the selected speech model and runtime in Manage models first.')
         if validate and c.learning_model_id=='qwen':
             if not resolve('qwen') or not (resolve('ai-cpu') if c.processing_mode=='cpu' else resolve('ai-vulkan') or (resolve('ai-cpu') if c.processing_mode=='auto' else None)):raise ValueError('Install the selected local AI model and matching runtime first.')
         if c.speech_model_id in ('speech-large','speech-qwen'):
@@ -712,7 +798,7 @@ class SettingsContent:
             self.analysis_settings.service.status_changed.disconnect(self._analysis_status)
             self.analysis_settings.service.progress_changed.disconnect(self._analysis_progress)
         self.analysis_settings.dispose()
-        self.model_task.dispose();self.component_manager.dispose();self.speech_task.dispose()
+        self.model_task.dispose();self.component_manager.dispose();self.speech_task.dispose();self.learning_task.dispose();self.translation_task.dispose()
         try:self._events.speech_switch_finished.disconnect(self._speech_switch_finished)
         except (TypeError,RuntimeError):pass
         if getattr(self,'_setup_dialog',None):self._setup_dialog.reject()

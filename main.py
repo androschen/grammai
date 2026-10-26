@@ -282,7 +282,8 @@ def main() -> int:
     from core.paths import register_existing_models
     register_existing_models()
 
-    if not config.setup_completed:
+    from core.readiness import setup_required
+    if setup_required(config):
         from ui.model_setup import SetupDialog
         from ui.theme import style_for
         setup=SetupDialog(config);setup.setStyleSheet(style_for(config.theme))

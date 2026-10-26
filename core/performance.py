@@ -60,6 +60,7 @@ class PerformanceMonitor(QObject):
         metrics["gpu_memory_mb"] = None
         metrics["backend"] = self.pipeline.active_backend
         metrics["model"] = self.pipeline.active_model
+        metrics['speech_note'] = getattr(self.pipeline,'processing_note','')
         metrics['analysis_status'] = self.events.property('analysis_status') or 'Unloaded'
         metrics['analysis_duration_ms'] = self.events.property('analysis_duration_ms')
         metrics['recheck_duration_ms'] = self.events.property('recheck_duration_ms')

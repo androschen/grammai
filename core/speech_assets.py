@@ -22,7 +22,8 @@ def installed_paths():
         servers=list((root/VERSION).rglob('whisper-server.exe'))
         if servers and (root/MODEL_NAME).is_file():
             return servers[0],root/MODEL_NAME
-    return ROOT/VERSION/'whisper-server.exe',ROOT/MODEL_NAME
+    root=model_root()/'speech'
+    return root/VERSION/'whisper-server.exe',root/MODEL_NAME
 
 
 def install(progress=lambda message,percent:None,cancelled=lambda:False):

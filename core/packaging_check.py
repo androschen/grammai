@@ -68,6 +68,13 @@ def smoke_check(report,verify_models=False):
         settings._show_components(True);QApplication.processEvents()
         assert not settings._processing.isVisible() and settings.component_manager.isVisible()
         assert len(settings.component_manager.cards)==len(catalog())
+        manager=settings.component_manager
+        assert settings.manage_components.text()=='Manage models'
+        assert len(manager.delete_buttons)==len(catalog())
+        assert set(manager.group_totals)=={'Transcription','Translation','Translation & learning','Supporting runtimes'}
+        assert all('Available' not in row[2].text() for row in manager.cards.values())
+        assert hasattr(settings,'translation_download')
+        results['role_model_management']='ok'
         settings._show_components(False);QApplication.processEvents()
         assert settings._processing.isVisible()
         results['models_input_routing']='ok'
@@ -105,6 +112,27 @@ def smoke_check(report,verify_models=False):
         assert not active_jobs(),'Setup hardware check did not finish'
         assert not setup.finish.isEnabled() and setup.pages.count()==3
         setup.reject();setup.deleteLater();results['setup_wizard']='ok'
+        # A clean, frozen app must not inherit a developer's model paths or
+        # consider a copied setup flag proof that this PC is ready.
+        import tempfile,os
+        original_env={key:os.environ.get(key) for key in ('GRAMMAI_DATA_DIR','GRAMMAI_MODELS_DIR')}
+        try:
+            with tempfile.TemporaryDirectory(prefix='grammai-fresh-pc-') as fresh:
+                os.environ['GRAMMAI_DATA_DIR']=fresh;os.environ['GRAMMAI_MODELS_DIR']=str(Path(fresh)/'models')
+                from core.readiness import setup_required
+                from core.preferences import load_config
+                assert setup_required(load_config()), 'Empty PC bypassed first-run setup'
+                assert setup_required(AppConfig(setup_completed=True,speech_model_id='speech-qwen')), 'Missing models bypassed setup recovery'
+                fresh_page=SettingsPage(AppConfig(),EventBus())
+                assert not fresh_page.learning_download.isHidden(), 'Fresh PC has no learning AI download action'
+                assert fresh_page._processing.findData('gpu')>=0
+                fresh_page.dispose();fresh_page.close();fresh_page.deleteLater()
+                results['fresh_pc_setup']='ok';results['learning_model_download']='ok'
+        finally:
+            for key,value in original_env.items():
+                if value is None:os.environ.pop(key,None)
+                else:os.environ[key]=value
+
 
         from ui.deck import LearningDeckDialog
         from core.phrasebook import Phrasebook

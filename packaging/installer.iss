@@ -1,4 +1,4 @@
-#define AppVersion "0.15.3"
+#define AppVersion "0.16.0"
 #ifndef AppSource
 #define AppSource "..\dist\GrammAI"
 #endif

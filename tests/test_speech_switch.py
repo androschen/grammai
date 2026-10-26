@@ -35,7 +35,7 @@ class SwitchEngine:
 class SpeechSwitchTests(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name)
-  self.env=patch.dict(os.environ,GRAMMAI_DATA_DIR=self.temp.name);self.env.start();self.pipeline=None
+  self.env=patch.dict(os.environ,GRAMMAI_DATA_DIR=self.temp.name,GRAMMAI_MODELS_DIR=str(self.folder/'models'));self.env.start();self.pipeline=None
  def tearDown(self):
   if self.pipeline:
    self.pipeline.stop();settle(lambda:self.pipeline._switch is None);self.pipeline._timer.stop()
@@ -46,7 +46,7 @@ class SpeechSwitchTests(unittest.TestCase):
   self.assertEqual(components('speech-qwen'),('speech-qwen','qwen-asr-runtime'))
   self.assertEqual(components('speech-large'),('speech-large','speech-runtime'))
   c=AppConfig(analysis_gguf='original-text.gguf',translation_mode='context')
-  with patch('core.components.resolve',side_effect=lambda key:self.file(key)):
+  with patch('core.components.resolve',side_effect=lambda key:self.file(key)),patch('core.components.ComponentManager.availability',return_value='installed'):
    draft=configure(c,'speech-qwen')
   self.assertEqual(draft.backend,'qwen-asr');self.assertEqual(draft.analysis_gguf,c.analysis_gguf);self.assertEqual(draft.translation_mode,c.translation_mode)
  def test_missing_runtime_is_not_installed_and_cannot_be_saved(self):
@@ -104,7 +104,7 @@ class SpeechSwitchTests(unittest.TestCase):
  def test_settings_waits_for_switch_and_updates_baseline_after_success(self):
   from ui.settings import SettingsPage
   config=AppConfig();events=EventBus();engine=SwitchEngine();self.pipeline=TranslationPipeline(config,events,engine)
-  with patch('ui.settings.list_audio_sources',return_value=[]),patch('core.components.resolve',side_effect=lambda key:self.file(key)):
+  with patch('ui.settings.list_audio_sources',return_value=[]),patch('core.components.resolve',side_effect=lambda key:self.file(key)),patch('core.components.ComponentManager.availability',return_value='installed'):
    d=SettingsPage(config,events,page=3);d._speech_choice.setCurrentIndex(d._speech_choice.findData('speech-qwen'))
    self.assertFalse(d.apply());self.assertEqual(config.speech_model_id,'external');self.assertFalse(d.tabs.isEnabled())
    settle(lambda:d._pending_switch is None)
@@ -112,7 +112,7 @@ class SpeechSwitchTests(unittest.TestCase):
  def test_failed_settings_switch_keeps_original_and_allows_retry(self):
   from ui.settings import SettingsPage
   config=AppConfig();events=EventBus();engine=SwitchEngine();engine.fail=True;self.pipeline=TranslationPipeline(config,events,engine)
-  with patch('ui.settings.list_audio_sources',return_value=[]),patch('core.components.resolve',side_effect=lambda key:self.file(key)):
+  with patch('ui.settings.list_audio_sources',return_value=[]),patch('core.components.resolve',side_effect=lambda key:self.file(key)),patch('core.components.ComponentManager.availability',return_value='installed'):
    d=SettingsPage(config,events,page=3);d._speech_choice.setCurrentIndex(d._speech_choice.findData('speech-qwen'));d.apply()
    settle(lambda:d._pending_switch is None);self.assertEqual(config.speech_model_id,'external');self.assertTrue(d.save_changes.isEnabled());self.assertIn('Previous speech model kept',d._feedback.text());d.dispose();d.close()
  def test_qwen_gpu_status_requires_both_backend_and_successful_model_load(self):

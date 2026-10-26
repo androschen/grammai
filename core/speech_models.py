@@ -14,13 +14,14 @@ def paths(identifier,config=None):
     from core.components import resolve,catalog
     found={key:resolve(key) for key in components(identifier)}
     from core.components import ComponentManager
-    if identifier=='speech-cpu' and ComponentManager().availability(identifier)!='installed':found[identifier]=None
+    for key in found:
+        if found[key] and ComponentManager().availability(key)!='installed':found[key]=None
     if config:
         for key in components(identifier):
             if found[key]:continue
             value=config.vulkan_executable if key=='speech-runtime' else config.vulkan_model if key in ('speech-turbo','speech-large') else ''
             file=Path(value) if value else None
-            if file and file.is_file() and file.name==catalog()[key].entry:found[key]=file
+            if file and file.is_file() and file.name==catalog()[key].entry and file.stat().st_size==(catalog()[key].size if catalog()[key].kind!='runtime' else file.stat().st_size) and file.stat().st_size>0:found[key]=file
     return found
 
 def installed(identifier,config=None):

@@ -2,6 +2,22 @@
 
 Versions 0.7.2–0.9.7 below describe local desktop builds first published together in v0.9.8.
 
+## 0.16.0
+
+- Organize Models settings by Transcription, live Translation, and Learning assistant, with direct downloads and shared Qwen weights.
+- Replace the flat component list with a separate Manage models page: categorized storage totals, per-model verification, deletion/disconnection and advanced runtime tools.
+- Distinguish not downloaded, incomplete and detected files; validate sizes and required runtime files without hashing models on the UI thread.
+- Protect selected/shared models and runtimes, preserve external originals when disconnecting, and rediscover nested runtime installations.
+- Include the first-run setup, learning downloads and CPU/GPU fallback improvements prepared in 0.15.4.
+
+## 0.15.4
+
+- Show first-run setup when configuration is partial or required models/runtimes are missing, even if a copied setup flag says complete. Preserve working existing installations.
+- Detect Windows display adapters before model runtimes exist; recommend GPU-capable setup provisionally and verify actual allocation in the compatibility test.
+- Add direct Learning assistant downloads for Qwen and the selected CPU/Vulkan runtimes. Automatic mode includes a CPU runtime without duplicating shared weights.
+- Show CPU-only selection, GPU fallback reasons, GPU retry, and the backend actually verified during a speech-model switch.
+- Resolve legacy model paths dynamically after model-folder changes and add isolated clean-PC onboarding and installation regressions.
+
 ## 0.15.3
 
 - Disable Settings Save changes until configuration is edited. Reverting changes, successful saves, and completed model switches clear the unsaved state; failed saves retain edits for retry.

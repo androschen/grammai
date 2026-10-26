@@ -24,7 +24,7 @@ def managed_paths(root=None):
         for candidate in model_candidates('local-ai'):
             if (candidate/RUNTIME_VERSION/'llama-server.exe').is_file() and (candidate/MODEL_FILE).is_file():
                 return candidate/RUNTIME_VERSION/'llama-server.exe',candidate/MODEL_FILE
-        root=ASSET_ROOT
+        root=model_root()/'local-ai'
     root = Path(root)
     return root / RUNTIME_VERSION / 'llama-server.exe', root / MODEL_FILE
 

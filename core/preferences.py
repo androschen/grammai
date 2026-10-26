@@ -65,7 +65,8 @@ def load_config() -> AppConfig:
         except (TypeError, ValueError):
             continue
     if config.processing_mode not in ('legacy','auto','cpu','gpu'):config.processing_mode='legacy'
-    if 'setup_completed' not in saved and saved:config.setup_completed=True
+    if 'setup_completed' not in saved and saved:
+        config.setup_completed=bool(saved.get('vulkan_model') or saved.get('model_size') or saved.get('speech_model_id') not in (None,'external'))
     if config.translation_mode not in ("fast", "context", "review"):
         config.translation_mode = "fast"
     if config.translation_mode == "review":

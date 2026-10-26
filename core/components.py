@@ -102,11 +102,16 @@ class ComponentManager:
         write_json('components.json',{'schema':1,'root':str(root or self.root),'items':records})
     def path(self,identifier):
         record=self.records().get(identifier,{})
+        if record.get('disconnected'):return None
         path=Path(record['path']) if record.get('path') else None
         if path and path.is_file():return path
         spec=catalog().get(identifier)
         if spec is None:return None
-        candidates=[self.root/'managed'/identifier/spec.version/spec.entry]
+        base=self.root/'managed'/identifier/spec.version
+        candidates=[base/spec.entry]
+        if spec.kind=='runtime' and base.is_dir():
+            entries=list(base.rglob(spec.entry))
+            if len(entries)==1:candidates.append(entries[0])
         if identifier=='speech-cpu':
             caches=[Path.home()/'.cache/huggingface/hub']
             for name in ('HF_HUB_CACHE','HUGGINGFACE_HUB_CACHE'):
@@ -120,7 +125,18 @@ class ComponentManager:
         path=self.path(identifier)
         if path is None:return 'missing'
         spec=catalog()[identifier]
-        if spec.kind=='ct2' and any(not (path.parent/asset.name).is_file() for asset in spec.assets):return 'incomplete'
+        try:
+            if spec.kind!='runtime':
+                if any(not (path.parent/a.name).is_file() or (path.parent/a.name).stat().st_size!=a.size for a in spec.assets):return 'incomplete'
+            else:
+                record=self.records().get(identifier,{})
+                if path.stat().st_size==0:return 'incomplete'
+                if record.get('managed'):
+                    base=(self.root/'managed'/identifier/record['version']).resolve()
+                    for name in record.get('hashes',{}):
+                        file=(base/name).resolve()
+                        if not file.is_relative_to(base) or not file.is_file():return 'incomplete'
+        except OSError:return 'incomplete'
         return 'installed'
 
     def register(self,identifier,path,managed=False,hashes=None):
@@ -148,7 +164,10 @@ class ComponentManager:
     def install(self,identifier,progress=lambda m,p:None,cancelled=lambda:False):
         spec=catalog()[identifier]
         existing=self.path(identifier)
-        if existing and spec.kind=='runtime' and not self.records()[identifier].get('managed'):return existing
+        if existing and spec.kind=='runtime' and not self.records().get(identifier,{}).get('managed'):
+            if not self.records().get(identifier):self.register(identifier,existing)
+            if self.availability(identifier)!='installed':raise ValueError('Runtime files are incomplete. Repair or import a complete runtime.')
+            return existing
         if existing:
             if spec.kind=='ct2':
                 for asset in spec.assets:
@@ -220,6 +239,11 @@ class ComponentManager:
             raise
         if backup and backup.exists() and backup.resolve().is_relative_to((self.root/'managed').resolve()):shutil.rmtree(backup)
         return result
+    def disconnect(self,identifier):
+        record=self.records().get(identifier,{})
+        if record.get('managed'):raise ValueError('Use Delete for managed files.')
+        records=self.records();records[identifier]={'disconnected':True}
+        self._save(records)
     def remove(self,identifier):
         record=self.records().get(identifier)
         if not record or not record.get('managed'):raise ValueError('External files are never removed by GrammAI.')

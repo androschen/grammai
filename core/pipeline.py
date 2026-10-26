@@ -210,7 +210,8 @@ class TranslationPipeline(QObject):
             self._engine.configure(replace(self._config))
         if not self._want_inference or self._closing:self._engine.close()
         worker.deleteLater();self._events.setProperty('speech_switch_busy',False)
-        result={'token':request['token']}
+        result={'token':request['token'],'backend':worker.backend,'note':worker.note}
+        if not error:self._events.setProperty('last_speech_check',dict(model=worker.config.speech_model_id,backend=worker.backend,note=worker.note))
         if error or self._closing:result['error']=error or 'Switch cancelled during shutdown.'
         self._events.speech_switch_finished.emit(result)
         self._events.status_changed.emit('Speech switch failed; previous model retained. '+error if error else 'Speech model selected successfully.')
@@ -231,6 +232,10 @@ class TranslationPipeline(QObject):
         if self._benchmark is not None:
             return "Benchmark running"
         return getattr(self._engine, 'active_backend', 'Not loaded') if self.running else "Stopped"
+
+    @property
+    def processing_note(self):
+        return getattr(self._engine,'processing_note','') if self.running else ''
 
     @property
     def active_model(self):

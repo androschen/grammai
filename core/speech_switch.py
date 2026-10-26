@@ -4,7 +4,7 @@ from PySide6.QtCore import QThread,Signal
 
 class SpeechSwitchWorker(QThread):
     def __init__(self,engine,config):
-        super().__init__();self.engine=engine;self.config=replace(config);self.error=None
+        super().__init__();self.engine=engine;self.config=replace(config);self.error=None;self.backend='';self.note=''
     def run(self):
         try:
             self.engine.configure(self.config);self.engine.ensure_loaded(cancelled=self.isInterruptionRequested)
@@ -16,6 +16,7 @@ class SpeechSwitchWorker(QThread):
             if not text.strip():raise RuntimeError('The speech model produced no transcript for the setup sample.')
             if self.isInterruptionRequested():raise InterruptedError('Speech switch cancelled')
             self.engine.configure(self.config)
+            self.backend=getattr(self.engine,'active_backend','');self.note=getattr(self.engine,'processing_note','')
         except Exception as exc:
             self.error=str(exc);self.engine.close()
     def cancel(self):

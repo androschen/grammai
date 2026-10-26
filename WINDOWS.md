@@ -106,3 +106,17 @@ Turbo Q5 is about 574 MB, full large-v3 Q5 about 1.08 GB, and Qwen3-ASR-1.7B Q8 
 Settings > Models separates Live translation from AI refinement. Live translation chooses NLLB on CPU or the shared local Qwen model. Optional refinement reviews original speech and nearby dialogue; choose history only or history plus the currently displayed subtitle. When Qwen already translates live with context, an additional review pass is disabled to avoid competing for the same runtime.
 
 Hover, focus, or click the info icon beside Sentence to see the models actually used, CPU/GPU backend, refinement result, and any fallback. Existing sentences retain their own metadata when settings change. Missing legacy metadata is reported as not recorded rather than inferred from current settings. Installed Whisper base cache files are reused in place; no duplicate download is required.
+
+### New PC setup (0.15.4)
+
+GrammAI opens setup for an empty profile and when required model files are missing, including copied preferences from another PC. Choose Recommended or Essential, review components, then Install & test. Start is enabled only after the compatibility check succeeds. Models, runtimes, and learning AI can also be downloaded from Settings > Models without editing file paths.
+
+For NVIDIA, AMD, or Intel hardware, a display adapter name is only a recommendation; the Vulkan runtime must confirm GPU model allocation. CPU only intentionally keeps speech on CPU. Use GPU switches the draft to GPU preferred; Save changes tests acceleration before applying it. Automatic can use an installed CPU backup and displays the reason. NLLB live translation still runs on CPU independently of GPU speech recognition.
+
+### Manage models (0.16.0)
+
+Settings > Models groups choices into Transcription, Translation and Learning assistant. Downloading installs missing runtimes together with the model; shared Qwen weights are stored once. Save changes applies model selections after the existing compatibility checks.
+
+Open Manage models for categorized disk usage, verification and deletion. Not downloaded means no matching files were detected, Incomplete means required files or sizes do not match, and Files detected is not a compatibility or GPU claim. Verify runs a checksum check in the background. Actual processing is shown by running telemetry in Models settings.
+
+Selected models cannot be deleted until their features are switched or disabled and saved. Supporting runtimes stay protected while installed models depend on them. Disconnect removes an external file from GrammAI's catalog without deleting the original. Supporting runtimes and Advanced expose repair, import and location tools. Cards, recordings and preferences are separate from model storage.
