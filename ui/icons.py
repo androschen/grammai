@@ -41,6 +41,11 @@ class LineIcon(QIconEngine):
             from PySide6.QtGui import QPainterPath
             path=QPainterPath();path.moveTo(12,3);path.lineTo(20,6);path.lineTo(19,14);path.quadTo(17,19,12,22);path.quadTo(7,19,5,14);path.lineTo(4,6);path.closeSubpath();p.drawPath(path)
             line(8,12,11,15);line(11,15,16,9)
+        elif n=='folder':
+            from PySide6.QtGui import QPainterPath
+            path=QPainterPath();path.moveTo(3,7);path.lineTo(3,19);path.lineTo(21,19);path.lineTo(21,7);path.lineTo(12,7);path.lineTo(9,4);path.lineTo(3,4);path.closeSubpath();p.drawPath(path)
+        elif n=='archive':
+            p.drawRoundedRect(QRectF(3,4,18,5),1,1);p.drawRoundedRect(QRectF(5,9,14,12),1,1);line(10,13,14,13)
         elif n=='info':
             p.drawEllipse(QRectF(3,3,18,18));line(12,11,12,17);p.drawEllipse(QRectF(11.5,6.5,1,1))
         elif n=='more':

@@ -95,6 +95,9 @@ def smoke_check(report,verify_models=False):
         settings_page._source.setCurrentIndex(original)
         assert not settings_page.save_changes.isEnabled(), 'Reverted settings still enable Save'
         results['settings_dirty_state']='ok'
+        assert hasattr(settings_page.storage,'gauge') and hasattr(settings_page.storage,'backup')
+        assert hasattr(settings_page.storage,'manage_models') and settings_page.storage.advanced.isHidden()
+        results['storage_redesign']='ok'
         bar=settings_page.tabs.tabBar()
         for index in (0,1,2,3,4,5,2):
             point=bar.mapTo(host,bar.tabRect(index).center())
@@ -114,6 +117,9 @@ def smoke_check(report,verify_models=False):
             QTest.qWait(10)
         assert not active_jobs(),'Setup hardware check did not finish'
         assert not setup.finish.isEnabled() and setup.pages.count()==3
+        assert setup.continue_button.text()=='Download & test' and not setup._advanced.isVisible()
+        assert len(setup.download_rows)==3 and len(setup.ready_rows)==3
+        results['friendly_setup']='ok'
         setup.reject();setup.deleteLater();results['setup_wizard']='ok'
         # A clean, frozen app must not inherit a developer's model paths or
         # consider a copied setup flag proof that this PC is ready.
@@ -131,6 +137,22 @@ def smoke_check(report,verify_models=False):
                 assert fresh_page._processing.findData('gpu')>=0
                 fresh_page.dispose();fresh_page.close();fresh_page.deleteLater()
                 results['fresh_pc_setup']='ok';results['learning_model_download']='ok'
+                # Backups and cleanup touch only synthetic files in this isolated profile.
+                from core.storage_data import export_deck,audio_snapshot,cleanup_recordings
+                from core.preferences import write_json
+                import hashlib,zipfile
+                audio_folder=Path(fresh)/'audio';audio_folder.mkdir(exist_ok=True)
+                linked=hashlib.sha256(b'linked smoke recording').hexdigest()+'.ogg'
+                orphan=hashlib.sha256(b'orphan smoke recording').hexdigest()+'.ogg'
+                (audio_folder/linked).write_bytes(b'linked smoke recording');(audio_folder/orphan).write_bytes(b'orphan smoke recording')
+                write_json('phrases.json',[{'id':'storage-smoke','native_text':'你好','target_text':'Hello','notes':'Synthetic backup fixture','audio':{'file':linked}}])
+                backup_path=Path(fresh)/'learning.zip';backup_result=export_deck(backup_path)
+                assert backup_result['cards']==1 and backup_result['recordings']==1
+                with zipfile.ZipFile(backup_path) as archive:
+                    assert set(archive.namelist())=={'phrases.json','manifest.json','audio/'+linked}
+                cleanup_result=cleanup_recordings(audio_snapshot()['unused_files'])
+                assert cleanup_result['removed_files']==1 and (audio_folder/linked).is_file() and not (audio_folder/orphan).exists()
+                results['storage_backup_cleanup']='ok'
         finally:
             for key,value in original_env.items():
                 if value is None:os.environ.pop(key,None)

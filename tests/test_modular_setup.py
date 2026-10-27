@@ -104,8 +104,8 @@ class ModularSetupTests(unittest.TestCase):
     def test_setup_three_steps_preserve_choices_until_real_test_succeeds(self):
         from ui.model_setup import SetupDialog,active_jobs
         with patch.object(SetupDialog,'detect_hardware',return_value={'cpu':'Test CPU','ram_bytes':8*1024**3,'devices':[]}):
-            d=SetupDialog(AppConfig());d.show();settle(lambda:not active_jobs());d.essential.click();d.continue_button.click()
-            self.assertEqual(d.pages.currentIndex(),1);self.assertFalse(d.ai.isChecked());self.assertFalse(d.fast.isChecked());self.assertFalse(d.finish.isEnabled())
+            d=SetupDialog(AppConfig());d.show();settle(lambda:not active_jobs());d.essential.click();d.show_step(1)
+            self.assertEqual(d.pages.currentIndex(),1);self.assertFalse(d.ai.isChecked());self.assertTrue(d.fast.isChecked());self.assertFalse(d.finish.isEnabled())
             d.back.click();self.assertEqual(d.pages.currentIndex(),0);d.reject()
     def test_selected_managed_model_requires_install_and_manager_is_inline(self):
         from ui.settings import SettingsDialog

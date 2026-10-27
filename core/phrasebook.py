@@ -226,8 +226,9 @@ class Phrasebook:
         self._write(remaining);self._release_audio(old,remaining)
 
     @audio_transaction
-    def clear(self):
+    def clear(self,preserve_audio=False):
         items=self.items();self._write([])
+        if preserve_audio:return
         for item in items:self._release_audio(item.get('audio'),[])
 
     def stats(self):

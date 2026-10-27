@@ -47,6 +47,9 @@ class SettingsContent:
         storage_layout=self._page("Storage")
         self.storage=StorageWidget(config,events,replays)
         storage_layout.addWidget(self.storage)
+        self.storage.manage_models_requested.connect(self._storage_models)
+        self.component_manager.changed.connect(self.storage.invalidate_models)
+        self._theme.currentIndexChanged.connect(lambda:self.storage.set_theme(self._theme.currentData()))
         self.tabs.currentChanged.connect(lambda index:self.storage.set_active(index==4 and (not self.embedded or self._active)))
         self.tabs.setCurrentIndex(page)
         self._analysis_page()
@@ -423,6 +426,9 @@ class SettingsContent:
 
     def _models_inventory_changed(self):
         self._speech_choice.refresh();self._describe_preset()
+
+    def _storage_models(self):
+        self.tabs.setCurrentIndex(3);self._show_components(True)
 
     def _show_components(self,opened):
         self.component_stack.setCurrentIndex(1 if opened else 0)
@@ -802,7 +808,7 @@ class SettingsContent:
         try:self._events.speech_switch_finished.disconnect(self._speech_switch_finished)
         except (TypeError,RuntimeError):pass
         if getattr(self,'_setup_dialog',None):self._setup_dialog.reject()
-        self.storage.set_active(False)
+        self.storage.dispose()
         for signal,slot in ((self._events.metrics_changed,self._model_metrics),
             (self._events.audio_level_changed,self._on_audio_level),
             (self._events.benchmark_progress,self._benchmark_progress),

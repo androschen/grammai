@@ -2,7 +2,7 @@
 
 Learn languages from real conversations, locally on Windows.
 
-**[Download v0.16.1](https://github.com/androschen/grammai/releases/tag/v0.16.1)** · [Windows setup](WINDOWS.md) · [User guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
+**[Download v0.18.0](https://github.com/androschen/grammai/releases/tag/v0.18.0)** · [Windows setup](WINDOWS.md) · [User guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
 
 ![GrammAI learning deck with conversation examples and pronunciation](docs/images/grammai-desktop.png)
 
@@ -23,7 +23,7 @@ Speech recognition, translation and AI explanations run locally after model setu
 
 ## Get started
 
-Install the Windows package from [Releases](https://github.com/androschen/grammai/releases/latest), configure your models, select an audio source and languages, then press Play. Use CC to show or hide desktop subtitles.
+Install the Windows package from [Releases](https://github.com/androschen/grammai/releases/latest), follow the feature-based setup, select an audio source and languages, then press Play. Use CC to show or hide desktop subtitles.
 
 For the latest source version:
 
@@ -34,6 +34,6 @@ python main.py
 
 ## Your data
 
-Cards, recordings and settings stay in `%LOCALAPPDATA%\GrammAI`. Back up `phrases.json` and `audio/` together. Session conversations are temporary.
+Cards, recordings and settings stay in `%LOCALAPPDATA%\GrammAI`. Use **Settings → Storage → Back up** to export cards and linked recordings. Session conversations are temporary.
 
 See the [user guide](docs/USAGE.md) for learning tools and [Windows setup](WINDOWS.md) for models and building the app.

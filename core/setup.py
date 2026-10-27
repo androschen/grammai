@@ -60,7 +60,7 @@ def test_configuration(config,progress=lambda m,p:None,cancelled=lambda:False):
         for i in range(3):
             if cancelled():raise InterruptedError('Cancelled')
             tick=perf_counter();engine._transcribe(audio,'transcribe');timings.append((perf_counter()-tick)*1000);progress('Measuring speech '+str(i+1)+'/3',20+15*i)
-        result=dict(backend=engine.active_backend,speech_ms=median(timings),audio_seconds=len(audio)/16000,loading_and_test_seconds=perf_counter()-start)
+        result=dict(backend=engine.active_backend,speech_note=engine.processing_note,speech_ms=median(timings),audio_seconds=len(audio)/16000,loading_and_test_seconds=perf_counter()-start)
         from core.model_info import refinement_enabled
         if c.analysis_enabled or c.translation_mode=='context' or refinement_enabled(c):
             ai.ensure_loaded(c,lambda message:progress(message,75),cancelled)

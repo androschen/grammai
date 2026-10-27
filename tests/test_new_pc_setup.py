@@ -102,7 +102,7 @@ class NewPCSetupTests(unittest.TestCase):
   self.assertTrue(VulkanWhisper.gpu_allocated('Vulkan0: NVIDIA RTX 4060 model buffer size 600 MB'))
 
  def test_first_run_install_test_finish_and_restart_are_one_in_app_flow(self):
-  d=SetupDialog(AppConfig());settle(lambda:d._detect_done);d.preset(False);d.show_step(1)
+  d=SetupDialog(AppConfig());settle(lambda:d._detect_done);d.preset(False);d.fast.setChecked(False);d.show_step(1)
   def install(identifier,progress,cancelled):
    self.assertEqual(identifier,'speech-cpu');folder=self.folder/'models/base-fixture';folder.mkdir(parents=True,exist_ok=True)
    for name in ('model.bin','config.json','tokenizer.json','vocabulary.txt'):(folder/name).write_bytes(b'fixture')

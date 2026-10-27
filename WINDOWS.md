@@ -120,3 +120,21 @@ Settings > Models groups choices into Transcription, Translation and Learning as
 Open Manage models for categorized disk usage, verification and deletion. Not downloaded means no matching files were detected, Incomplete means required files or sizes do not match, and Files detected is not a compatibility or GPU claim. Verify runs a checksum check in the background. Actual processing is shown by running telemetry in Models settings.
 
 Selected models cannot be deleted until their features are switched or disabled and saved. Supporting runtimes stay protected while installed models depend on them. Disconnect removes an external file from GrammAI's catalog without deleting the original. Supporting runtimes and Advanced expose repair, import and location tools. Cards, recordings and preferences are separate from model storage.
+
+### Friendly first-run setup (0.17.0)
+
+The Windows installer installs the app first. Its welcome page includes install location and desktop-shortcut controls; Install & open launches GrammAI after installation. Silent updates retain the existing no-auto-launch behavior.
+
+On first launch, choose Transcription, optional Subtitle translation and optional Learning assistant. Recommended uses hardware detection as a suggestion; Small download keeps compact CPU speech and lets you add learning later. Advanced setup contains processing, speech model, backup and location controls. Download & test starts only the selected features and required shared runtimes; it checks existing files first.
+
+Download progress is grouped by feature. Retry resumes partial downloads where the server supports it; Cancel retains saved bytes. Set up learning later stops the current operation safely, keeps the partial Qwen download, and downloads/tests the remaining choices. GPU test failures can be retried explicitly on CPU. Start GrammAI enables only after successful testing; the Ready page reports the backend actually tested. Device names and completed downloads alone do not confirm GPU compatibility or conversation accuracy.
+
+### Storage and learning backups (0.18.0)
+
+Settings > Storage separates saved recordings, learning cards and model files. The quota gauge distinguishes recordings referenced by cards from unused files. Quota edits take effect with Save changes; at capacity, existing recordings stay and new cards can be saved without audio.
+
+Clean up opens a preview. Confirmation re-reads current card references and removes only unchanged, reviewed unused clips. Cards and linked audio stay. RAM-only replay, benchmark summaries and explicit card deletion are under Advanced. Deleting cards here retains the recordings for a separate cleanup review.
+
+Back up creates a local ZIP containing phrases.json, a versioned manifest with checksums, and each linked available recording once. Models, preferences and unused recordings are excluded. Missing recordings are reported. To restore manually with GrammAI closed, preserve your existing data first, then copy phrases.json and audio/ from the archive into the app data folder; this replaces the deck rather than merging it. There is no automatic restore operation in this version.
+
+Model-size scans include managed components, recognized legacy/cache locations and configured external files. Shared/hardlinked files are counted once; downloaded/partial files retained for resume are listed separately. Size scans are bounded and partial results are marked. Manage models opens the existing per-model management page.

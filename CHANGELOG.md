@@ -2,6 +2,24 @@
 
 Versions 0.7.2–0.9.7 below describe local desktop builds first published together in v0.9.8.
 
+## 0.18.0
+
+- Prevent delayed setup-close callbacks from running after the dialog is deleted.
+
+- Redesign Storage into saved recordings, learning deck and models, with an audio quota gauge and full-limit guidance. Keep RAM, test results and card deletion under Advanced.
+- Preview unused recording cleanup, then recheck references and file identity metadata before removing only the reviewed files.
+- Add atomic local ZIP backups containing card text, notes, explanations and shared linked recordings, with checksums and missing-audio reporting. Exclude models and application settings.
+- Count managed model folders, configured files and known caches without double-counting shared/hardlinked files; report partial downloads separately and scan off the UI thread.
+- Link directly to Manage models, keep quota edits under Save changes, and retain recordings when deleting cards from Storage for separate cleanup.
+
+## 0.17.0
+
+- Simplify the Windows installer to a branded welcome with location/shortcut controls and an Install & open action; choose models after launching the app.
+- Replace technical setup pages with feature-based Transcription, Subtitle translation and Learning assistant choices, download sizes and expandable Advanced controls.
+- Show per-feature downloads, retained progress, reconnect/retry actions and cancellation. Defer optional learning downloads while preserving partial files.
+- Gate Start on completed compatibility tests and display the actual CPU/GPU result, fallback reason and explicit CPU/GPU retry actions.
+- Keep learning AI independent of subtitle translation during setup, and preserve selections made while hardware detection finishes.
+
 ## 0.16.1
 
 - Retry interrupted model/runtime transfers up to five attempts, resuming verified-size partial downloads with cancellable backoff.
